@@ -3,7 +3,7 @@ const std = @import("std");
 pub fn build(b: *std.Build) void {
     const override_vulkan_registry = b.option([]const u8, "vulkan_registry", "Override the path to the Vulkan registry");
 
-    const target = b.standardTargetOptions(.{});
+    const target = b.standardTargetOptions(.{ .default_target = .{ .abi = .gnu } });
     const optimize = b.standardOptimizeOption(.{});
 
     const vulkan_registry = b.dependency("vulkan_headers", .{}).path("registry/vk.xml");

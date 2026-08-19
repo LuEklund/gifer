@@ -6,6 +6,26 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{ .default_target = .{ .abi = .gnu } });
     const optimize = b.standardOptimizeOption(.{});
 
+    const numz = b.dependency("numz", .{ .target = target, .optimize = optimize }).module("numz");
+
+    const stb_dep = b.dependency("stb", .{});
+    const stb_truetype = b.addTranslateC(.{
+        .root_source_file = stb_dep.path("stb_truetype.h"),
+        .target = target,
+        .optimize = optimize,
+    });
+    stb_truetype.addIncludePath(stb_dep.path("."));
+
+    const stb_image = b.addTranslateC(.{
+        .root_source_file = stb_dep.path("stb_image.h"),
+        .target = target,
+        .optimize = optimize,
+    });
+    stb_image.addIncludePath(stb_dep.path("."));
+
+    const stb_truetype_module = stb_truetype.addModule("stb_truetype");
+    const stb_image_module = stb_image.addModule("stb_image");
+
     const vulkan_registry = b.dependency("vulkan_headers", .{}).path("registry/vk.xml");
 
     const vulkan_registry_path: std.Build.LazyPath = if (override_vulkan_registry) |path|
@@ -24,6 +44,9 @@ pub fn build(b: *std.Build) void {
         .imports = &.{
             .{ .name = "vulkan", .module = vulkan },
             .{ .name = "win32", .module = win32 },
+            .{ .name = "numz", .module = numz },
+            .{ .name = "stb_image", .module = stb_image_module },
+            .{ .name = "stb_truetype", .module = stb_truetype_module },
         },
         .link_libc = switch (target.result.os.tag) {
             .linux, .freebsd, .openbsd, .netbsd, .dragonfly, .illumos => true,
@@ -49,7 +72,6 @@ pub fn build(b: *std.Build) void {
             scanner.addCustomProtocol(wayland_protocols.path("unstable/pointer-constraints/pointer-constraints-unstable-v1.xml"));
             scanner.addCustomProtocol(wayland_protocols.path("unstable/relative-pointer/relative-pointer-unstable-v1.xml"));
             scanner.addCustomProtocol(wayland_protocols.path("staging/xdg-toplevel-icon/xdg-toplevel-icon-v1.xml"));
-
 
             scanner.generate("wl_compositor", 1);
             scanner.generate("wl_output", 4);

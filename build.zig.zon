@@ -34,6 +34,15 @@
             .url = "git+https://github.com/KhronosGroup/Vulkan-Headers#f6a6f7ab165cedbfa2a7d0c93fe27a2d01ce09c8",
             .hash = "N-V-__8AAC1ZbAIG2kVq3iPpAWaOlDTQ3MOyOyQQR0o_-9ez",
         },
+
+        .numz = .{
+            .url = "git+https://github.com/LuEklund/numz.git#b230c27e927c328a1528713ba782ee302f28317b",
+            .hash = "numz-0.0.2-V-sGm0rfAABDpmxYTHA_A6bc3MFGtn_YJ9VKkhTlDBmH",
+        },
+        .stb = .{
+            .url = "git+https://github.com/nothings/stb#fede005abaf93d9d7f3a679d1999b2db341b360f",
+            .hash = "N-V-__8AACIvTgCTqOj6KM32YnqNx1bcsaMuGAeKQEIWZ8Ph",
+        },
     },
     .paths = .{
         "build.zig",

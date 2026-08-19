@@ -11,6 +11,7 @@ memory: vk.DeviceMemory,
 usage: Usage,
 
 pub const Usage = enum(vk.Flags) {
+    staging = 0x00000001,
     uniform = 0x00000010,
     storage = 0x00000020,
     index = 0x00000040,

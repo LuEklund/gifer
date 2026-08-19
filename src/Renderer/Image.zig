@@ -3,6 +3,8 @@ const Image = @This();
 const std = @import("std");
 const vk = @import("vulkan");
 
+const Buffer = @import("Buffer.zig");
+const CommandHandler = @import("CommandHandler.zig");
 const Device = @import("Device.zig");
 const PhysicalDevice = @import("PhysicalDevice.zig");
 
@@ -119,4 +121,91 @@ pub fn deinit(self: Image, gpa: std.mem.Allocator, device: Device) void {
     device.proxy.destroyImageView(self.view, @ptrCast(@alignCast(gpa.ptr)));
     device.proxy.destroyImage(self.handle, @ptrCast(@alignCast(gpa.ptr)));
     device.proxy.freeMemory(self.memory, @ptrCast(@alignCast(gpa.ptr)));
+}
+
+pub fn uploadData(self: *Image, gpa: std.mem.Allocator, device: Device, physical_device: PhysicalDevice, command_handler: *const CommandHandler, data: []const u8) !void {
+    var staging: Buffer = try .init(
+        u8,
+        gpa,
+        physical_device,
+        device,
+        .staging,
+        data,
+    );
+    defer staging.deinit(gpa, device);
+    errdefer staging.deinit(gpa, device);
+
+    const cmd = try command_handler.beginImmediate(device);
+
+    const to_transfer: vk.ImageMemoryBarrier = .{
+        .old_layout = undefined,
+        .new_layout = .transfer_dst_optimal,
+        .src_access_mask = .{},
+        .dst_access_mask = .{ .transfer_write_bit = true },
+        .src_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
+        .dst_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
+        .image = self.handle,
+        .subresource_range = .{
+            .aspect_mask = .{
+                .color_bit = true,
+            },
+            .base_mip_level = 0,
+            .layer_count = 1,
+            .base_array_layer = 0,
+            .level_count = 1,
+        },
+    };
+
+    device.proxy.cmdPipelineBarrier(
+        cmd,
+        .{ .top_of_pipe_bit = true },
+        .{ .transfer_bit = true },
+        .{},
+        null,
+        null,
+        &.{to_transfer},
+    );
+
+    device.proxy.cmdCopyBufferToImage(
+        cmd,
+        staging.handle,
+        self.handle,
+        .transfer_dst_optimal,
+        &.{.{
+            .buffer_offset = 0,
+            .buffer_row_length = 0,
+            .buffer_image_height = 0,
+            .image_subresource = .{
+                .mip_level = 0,
+                .base_array_layer = 0,
+                .layer_count = 1,
+                .aspect_mask = .{ .color_bit = true },
+            },
+            .image_offset = .{ .x = 0, .y = 0, .z = 0 },
+            .image_extent = .{ .height = self.size.height, .width = self.size.width, .depth = 1 },
+        }},
+    );
+
+    const to_sampled: vk.ImageMemoryBarrier = .{
+        .old_layout = .transfer_dst_optimal,
+        .new_layout = .shader_read_only_optimal,
+        .src_access_mask = .{ .transfer_write_bit = true },
+        .dst_access_mask = .{ .shader_read_bit = true },
+        .src_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
+        .dst_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
+        .image = self.handle,
+        .subresource_range = to_transfer.subresource_range,
+    };
+
+    device.proxy.cmdPipelineBarrier(
+        cmd,
+        .{ .transfer_bit = true },
+        .{ .fragment_shader_bit = true },
+        .{},
+        null,
+        null,
+        &.{to_sampled},
+    );
+
+    try command_handler.endImmediate(device, cmd);
 }

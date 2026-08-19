@@ -2,6 +2,7 @@ const std = @import("std");
 const Capture = @import("Capture.zig");
 const Window = @import("Window.zig");
 const Renderer = @import("Renderer.zig");
+const Ui = @import("Ui.zig");
 
 pub const Info = struct { width: u32, height: u32, fps_num: u32, fps_den: u32 };
 
@@ -28,27 +29,27 @@ pub fn main(init: std.process.Init) !void {
     }
     std.debug.print("{} frames, {}x{}\n", .{ clip.frames.items.len, clip.info.width, clip.info.height });
 
-    // var window: Window = undefined;
-    // try window.open(gpa, init.minimal, .{
-    //     .title = "Gifer",
-    //     .app_id = "gifer",
-    //     .size = .{ .width = 700, .height = 500 },
-    // });
-    // defer window.close();
+    var window: Window = undefined;
+    try window.open(gpa, init.minimal, .{
+        .title = "Gifer",
+        .app_id = "gifer",
+        .size = .{ .width = 700, .height = 500 },
+    });
+    defer window.close();
 
-    // var renderer: Renderer = try .init(gpa, &window);
-    // defer renderer.deinit();
-    //
-    // while (!window.should_close) {
-    //     try window.poll(.{});
-    //
-    //     try renderer.resize(window.size);
-    //
-    //     const frame: Renderer.Frame = try .begin(&renderer, window.size, .{ .clear_color = .{ 1.0, 0.0, 0.0, 1.0 } });
-    //
-    //     try frame.end();
-    //     try renderer.submit(frame);
-    // }
+    var renderer: Renderer = try .init(gpa, &window);
+    defer renderer.deinit();
+
+    while (!window.should_close) {
+        try window.poll(.{});
+
+        try renderer.resize(window.size);
+
+        const frame: Renderer.Frame = try .begin(&renderer, window.size, .{ .clear_color = .{ 1.0, 0.0, 0.0, 1.0 } });
+
+        try frame.end();
+        try renderer.submit(frame);
+    }
 }
 
 pub fn load(gpa: std.mem.Allocator, io: std.Io, path: []const u8) !Clip {

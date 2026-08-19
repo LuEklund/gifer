@@ -19,9 +19,12 @@ const CommandHandler = @import("Renderer/CommandHandler.zig");
 const ShaderObject = @import("Renderer/ShaderObject.zig");
 const Buffer = @import("Renderer/Buffer.zig");
 const Image = @import("Renderer/Image.zig");
+const TextureTable = @import("Renderer/TextureTable.zig");
 
 gpa_impl: *Allocator,
 gpa: std.mem.Allocator,
+
+texture_table: TextureTable,
 
 dynlib: DynLib,
 
@@ -114,9 +117,18 @@ pub fn init(allocator: std.mem.Allocator, window: *Window) !Renderer {
     const command_handler: CommandHandler = try .init(gpa, physical_device, device);
     errdefer command_handler.deinit(gpa, device);
 
+    var texture_table: TextureTable = .{};
+    _ = try texture_table.createTexture(gpa, device, physical_device, &command_handler, .{
+        .width = 1,
+        .height = 1,
+        .data = &.{ 255, 255, 255, 255 },
+    });
+
     return .{
         .gpa_impl = gpa_impl,
         .gpa = gpa,
+
+        .texture_table = texture_table,
 
         .dynlib = dynlib,
 
@@ -138,6 +150,7 @@ pub fn deinit(self: *Renderer) void {
 
     device.proxy.deviceWaitIdle() catch unreachable;
 
+    self.texture_table.deinit(gpa, device);
     self.command_handler.deinit(gpa, device);
     self.swapchain.deinit(gpa, device);
     device.deinit(gpa);

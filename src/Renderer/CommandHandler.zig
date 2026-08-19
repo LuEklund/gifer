@@ -196,3 +196,31 @@ pub fn end(self: *CommandHandler, device: Device, swapchain: Swapchain) !void {
 
     try device.proxy.endCommandBuffer(command_buffer);
 }
+
+pub fn beginImmediate(self: *const CommandHandler, device: Device) !vk.CommandBuffer {
+    var cmd: vk.CommandBuffer = undefined;
+    try device.proxy.allocateCommandBuffers(&.{
+        .command_pool = self.command_pool,
+        .level = .primary,
+        .command_buffer_count = 1,
+    }, @ptrCast(&cmd));
+    try device.proxy.beginCommandBuffer(cmd, &.{ .flags = .{
+        .one_time_submit_bit = true,
+    } });
+    return cmd;
+}
+
+pub fn endImmediate(self: *const CommandHandler, device: Device, cmd: vk.CommandBuffer) !void {
+    try device.proxy.endCommandBuffer(cmd);
+    try device.proxy.queueSubmit(
+        device.graphics_queue,
+        &.{.{
+            .command_buffer_count = 1,
+            .p_command_buffers = @ptrCast(&cmd),
+        }},
+        .null_handle,
+    );
+    //TODO: could wait on frames in flight work instead?
+    try device.proxy.queueWaitIdle(device.graphics_queue);
+    device.proxy.freeCommandBuffers(self.command_pool, &.{cmd});
+}

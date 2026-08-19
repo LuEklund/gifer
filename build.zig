@@ -50,8 +50,6 @@ pub fn build(b: *std.Build) void {
             scanner.addCustomProtocol(wayland_protocols.path("unstable/relative-pointer/relative-pointer-unstable-v1.xml"));
             scanner.addCustomProtocol(wayland_protocols.path("staging/xdg-toplevel-icon/xdg-toplevel-icon-v1.xml"));
 
-            scanner.addCustomProtocol(b.path("protocols/wlr-screencopy-unstable-v1.xml"));
-            scanner.generate("zwlr_screencopy_manager_v1", 3);
 
             scanner.generate("wl_compositor", 1);
             scanner.generate("wl_output", 4);

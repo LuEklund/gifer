@@ -52,6 +52,55 @@ pub fn selectRegion(gpa: std.mem.Allocator, io: std.Io) !Region {
     };
 }
 
+pub fn negotiate(self: *Wayland, region: Region) !FrameData.Params {
+    var data: FrameData = .{};
+    const frame = try self.requestFrame(region, &data);
+    defer frame.destroy();
+
+    while (data.params == null) {
+        if (self.display.dispatch() != .SUCCESS) return error.Dispatch;
+        return data.params.?;
+    }
+}
+
+pub fn outputRegion(self: *Wayland, region: Region, buffer: *ShmBuffer) !u64 {
+    var data: FrameData = .{};
+    const frame = try self.requestFrame(region, &data);
+    defer frame.destroy();
+
+    while (data.params == null) {
+        if (self.display.dispatch() != .SUCCESS) return error.Dispatch;
+        if (!std.mem.eql(data.params.?, buffer.params)) return error.ParamChanged;
+        frame.copy(buffer.proxy);
+
+        while (data.state == .waiting) {
+            if (self.display.dispatch() != .SUCCESS) return error.Dispatch;
+        }
+
+        if (data.state == .failed) return error.CaptureFailed;
+        return data.timestamp_ns;
+    }
+}
+
+fn requestFrame(self: *Wayland, region: Region, data: *FrameData) !*zwlr.ScreencopyFrameV1 {
+    const frame = try self.manager.captureOutputRegion(
+        self.output,
+        0,
+        region.x,
+        region.y,
+        @intCast(region.width),
+        @intCast(region.height),
+    );
+    errdefer frame.destroy();
+
+    frame.setListener(*FrameData, FrameData.listener, data);
+
+    while (data.params == null)
+        if (self.display.dispatch() != .SUCCESS) return error.Dispatch;
+
+    return frame;
+}
+
 const RegistryData = struct {
     compositor: ?*wl.Compositor = null,
     seat: ?*wl.Seat = null,

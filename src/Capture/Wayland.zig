@@ -59,8 +59,8 @@ pub fn negotiate(self: *Wayland, region: Region) !FrameData.Params {
 
     while (data.params == null) {
         if (self.display.dispatch() != .SUCCESS) return error.Dispatch;
-        return data.params.?;
     }
+    return data.params.?;
 }
 
 pub fn outputRegion(self: *Wayland, region: Region, buffer: *ShmBuffer) !u64 {
@@ -68,24 +68,23 @@ pub fn outputRegion(self: *Wayland, region: Region, buffer: *ShmBuffer) !u64 {
     const frame = try self.requestFrame(region, &data);
     defer frame.destroy();
 
-    while (data.params == null) {
+    while (data.params == null) if (self.display.dispatch() != .SUCCESS) return error.Dispatch;
+
+    if (!std.meta.eql(data.params.?, buffer.params)) return error.ParamChanged;
+    frame.copy(buffer.proxy);
+
+    while (data.state == .waiting) {
         if (self.display.dispatch() != .SUCCESS) return error.Dispatch;
-        if (!std.mem.eql(data.params.?, buffer.params)) return error.ParamChanged;
-        frame.copy(buffer.proxy);
-
-        while (data.state == .waiting) {
-            if (self.display.dispatch() != .SUCCESS) return error.Dispatch;
-        }
-
-        if (data.state == .failed) return error.CaptureFailed;
-        return data.timestamp_ns;
     }
+
+    if (data.state == .failed) return error.CaptureFailed;
+    return data.timestamp_ns;
 }
 
 fn requestFrame(self: *Wayland, region: Region, data: *FrameData) !*zwlr.ScreencopyFrameV1 {
     const frame = try self.manager.captureOutputRegion(
-        self.output,
         0,
+        self.output,
         region.x,
         region.y,
         @intCast(region.width),
@@ -162,7 +161,7 @@ pub const ShmBuffer = struct {
             0,
             @intCast(params.width),
             @intCast(params.height),
-            @intCast(params.stride),
+            @intCast(params.bytes_per_row),
             params.format,
         );
 
@@ -176,7 +175,7 @@ pub const ShmBuffer = struct {
 };
 
 const FrameData = struct {
-    params: ?Params,
+    params: ?Params = null,
     state: enum { waiting, ready, failed } = .waiting,
     timestamp_ns: u64 = 0,
 
@@ -196,7 +195,7 @@ const FrameData = struct {
                 .bytes_per_row = b.stride,
             },
             .ready => |r| {
-                self.timestamp_ns = (@as(u64, r.tv_sec_hi) << 32) | r.tv_sec_lo * std.time.ns_per_s + r.tv_nsec;
+                self.timestamp_ns = ((@as(u64, r.tv_sec_hi) << 32) | r.tv_sec_lo) * std.time.ns_per_s + r.tv_nsec;
                 self.state = .ready;
             },
             .failed => self.state = .failed,

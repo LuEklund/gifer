@@ -9,4 +9,4 @@ pub const Region = struct {
     height: u32,
 };
 
-pub const selectRegion = Inner.selectRegion;
+pub const startRecording = Inner.startRecording;

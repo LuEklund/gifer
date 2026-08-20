@@ -19,6 +19,7 @@ pub const Info = struct {
     height: u32,
 };
 
+
 pub fn deinit(self: *TextureTable, device: Device) void {
     for (0..@intFromEnum(self.next_handle)) |handle| {
         self.table[handle].deinit(device);
@@ -32,7 +33,8 @@ pub fn createTexture(self: *TextureTable, device: Device, physical_device: Physi
         physical_device,
         vk.Format.r8g8b8a8_snorm,
         .{ .width = info.width, .height = info.height },
-        .{},
+        .{.transfer_dst_bit = true, .color_attachment_bit = true, .sampled_bit = true},
+        .{.color_bit = true},
     );
     try new_image.uploadData(
         device,

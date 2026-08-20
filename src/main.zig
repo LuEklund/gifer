@@ -45,10 +45,9 @@ pub fn main(init: std.process.Init) !void {
 
         try renderer.resize(window.size);
 
-        const frame: Renderer.Frame = try .begin(&renderer, window.size, .{ .clear_color = .{ 1.0, 0.0, 0.0, 1.0 } });
-
-        try frame.end(renderer.device);
-        try renderer.submit(frame);
+        try renderer.begin(window.size, .{ .clear_color = .{ 1.0, 0.0, 0.0, 1.0 } });
+        // renderer.draw();
+         try renderer.submit();
     }
 }
 

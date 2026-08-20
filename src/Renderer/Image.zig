@@ -13,17 +13,15 @@ view: vk.ImageView,
 format: vk.Format,
 size: vk.Extent2D,
 
-pub const Options = struct {
-    usage: vk.ImageUsageFlags = .{ .color_attachment_bit = true },
-    aspect: vk.ImageAspectFlags = .{ .color_bit = true },
-};
+
 
 pub fn init(
     device: Device,
     physical_device: PhysicalDevice,
     format: vk.Format,
     size: vk.Extent2D,
-    options: Options,
+    usage: vk.ImageUsageFlags,
+    aspect: vk.ImageAspectFlags,
 ) !Image {
     const extent = vk.Extent3D{
         .width = size.width,
@@ -39,7 +37,7 @@ pub fn init(
         .array_layers = 1,
         .samples = .{ .@"1_bit" = true },
         .tiling = .optimal,
-        .usage = options.usage,
+        .usage = usage,
         .sharing_mode = .exclusive,
         .initial_layout = .undefined,
     };
@@ -82,7 +80,7 @@ pub fn init(
         .view_type = .@"2d",
         .format = format,
         .subresource_range = .{
-            .aspect_mask = options.aspect,
+            .aspect_mask = aspect,
             .base_mip_level = 0,
             .level_count = 1,
             .base_array_layer = 0,

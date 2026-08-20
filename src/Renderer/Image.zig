@@ -1,10 +1,8 @@
 const Image = @This();
 
-const std = @import("std");
 const vk = @import("vulkan");
 
 const Buffer = @import("Buffer.zig");
-const CommandHandler = @import("CommandHandler.zig");
 const Device = @import("Device.zig");
 const PhysicalDevice = @import("PhysicalDevice.zig");
 
@@ -21,7 +19,6 @@ pub const Options = struct {
 };
 
 pub fn init(
-    gpa: std.mem.Allocator,
     device: Device,
     physical_device: PhysicalDevice,
     format: vk.Format,
@@ -49,11 +46,11 @@ pub fn init(
 
     const image = try device.proxy.createImage(
         &image_info,
-        @ptrCast(@alignCast(gpa.ptr)),
+        null,
     );
     errdefer device.proxy.destroyImage(
         image,
-        @ptrCast(@alignCast(gpa.ptr)),
+        null,
     );
 
     const requirements = device.proxy.getImageMemoryRequirements(image);
@@ -71,11 +68,11 @@ pub fn init(
 
     const memory = try device.proxy.allocateMemory(
         &memory_info,
-        @ptrCast(@alignCast(gpa.ptr)),
+        null,
     );
     errdefer device.proxy.freeMemory(
         memory,
-        @ptrCast(@alignCast(gpa.ptr)),
+        null,
     );
 
     try device.proxy.bindImageMemory(image, memory, 0);
@@ -101,11 +98,11 @@ pub fn init(
 
     const view = try device.proxy.createImageView(
         &view_info,
-        @ptrCast(@alignCast(gpa.ptr)),
+        null,
     );
     errdefer device.proxy.destroyImageView(
         view,
-        @ptrCast(@alignCast(gpa.ptr)),
+        null,
     );
 
     return .{
@@ -117,25 +114,25 @@ pub fn init(
     };
 }
 
-pub fn deinit(self: Image, gpa: std.mem.Allocator, device: Device) void {
-    device.proxy.destroyImageView(self.view, @ptrCast(@alignCast(gpa.ptr)));
-    device.proxy.destroyImage(self.handle, @ptrCast(@alignCast(gpa.ptr)));
-    device.proxy.freeMemory(self.memory, @ptrCast(@alignCast(gpa.ptr)));
+pub fn deinit(self: Image, device: Device) void {
+    device.proxy.destroyImageView(self.view, null);
+    device.proxy.destroyImage(self.handle, null);
+    device.proxy.freeMemory(self.memory, null);
 }
 
-pub fn uploadData(self: *Image, gpa: std.mem.Allocator, device: Device, physical_device: PhysicalDevice, command_handler: *const CommandHandler, data: []const u8) !void {
+pub fn uploadData(self: *Image, device: Device, physical_device: PhysicalDevice, data: []const u8) !void {
     var staging: Buffer = try .init(
         u8,
-        gpa,
         physical_device,
         device,
-        .staging,
+        .{ .transfer_src_bit = true },
+        .{ .host_visible_bit = true, .host_coherent_bit = true },
         data,
     );
-    defer staging.deinit(gpa, device);
-    errdefer staging.deinit(gpa, device);
+    defer staging.deinit(device);
+    errdefer staging.deinit(device);
 
-    const cmd = try command_handler.beginImmediate(device);
+    const cmd = try device.beginImmediate();
 
     const to_transfer: vk.ImageMemoryBarrier = .{
         .old_layout = .undefined,
@@ -207,5 +204,5 @@ pub fn uploadData(self: *Image, gpa: std.mem.Allocator, device: Device, physical
         &.{to_sampled},
     );
 
-    try command_handler.endImmediate(device, cmd);
+    try device.endImmediate(cmd);
 }

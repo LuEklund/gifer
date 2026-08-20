@@ -18,7 +18,7 @@ pub const Description = struct {
 
 pub const InitError = vk.DeviceProxy.CreateShadersEXTError;
 
-pub fn init(gpa: std.mem.Allocator, device: Device, description: Description) InitError!ShaderObject {
+pub fn init(device: Device, description: Description) InitError!ShaderObject {
     const magic = std.mem.readInt(u32, @ptrCast(std.mem.bytesAsSlice(u32, description.source[0..4])), .little);
     std.debug.assert(magic == 0x7230203);
 
@@ -34,26 +34,26 @@ pub fn init(gpa: std.mem.Allocator, device: Device, description: Description) In
     };
 
     var handle: vk.ShaderEXT = undefined;
-    _ = try device.proxy.createShadersEXT(&.{create_info.*}, @ptrCast(@alignCast(gpa.ptr)), @ptrCast(&handle));
+    _ = try device.proxy.createShadersEXT(&.{create_info.*}, null, @ptrCast(&handle));
     return .{
         .handle = handle,
         .stage = description.stage,
     };
 }
 
-pub fn initMany(comptime count: usize, gpa: std.mem.Allocator, device: Device, descriptions: [count]Description) InitError![count]ShaderObject {
+pub fn initMany(comptime count: usize, device: Device, descriptions: [count]Description) InitError![count]ShaderObject {
     var create_infos: [count]vk.ShaderCreateInfoEXT = undefined;
     for (&create_infos, &descriptions) |*create_info, description| create_info.* = vk.ShaderCreateInfoEXT{
         .code_type = .spirv_ext,
-        .stage = @bitCast(@intFromEnum(description.stage)),
-        .next_stage = @bitCast(@intFromEnum(description.next_stage)),
+        .stage = description.stage,
+        .next_stage = description.next_stage,
         .code_size = description.source.len,
         .p_code = @ptrCast(description.source.ptr),
         .p_name = description.entry_name,
     };
 
     var handles: [count]vk.ShaderEXT = undefined;
-    _ = try device.proxy.createShadersEXT(&create_infos, @ptrCast(@alignCast(gpa.ptr)), &handles);
+    _ = try device.proxy.createShadersEXT(&create_infos, null, &handles);
 
     var shader_objects: [count]ShaderObject = undefined;
     for (&shader_objects, &handles, &descriptions) |*shader_object, handle, description| shader_object.* = .{
@@ -64,6 +64,6 @@ pub fn initMany(comptime count: usize, gpa: std.mem.Allocator, device: Device, d
     return shader_objects;
 }
 
-pub fn deinit(self: ShaderObject, gpa: std.mem.Allocator, device: Device) void {
-    device.proxy.destroyShaderEXT(self.handle, @ptrCast(@alignCast(gpa.ptr)));
+pub fn deinit(self: ShaderObject, device: Device) void {
+    device.proxy.destroyShaderEXT(self.handle, null);
 }

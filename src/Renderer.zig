@@ -8,20 +8,17 @@ const vk = @import("vulkan");
 const DynLib = @import("DynLib.zig");
 const Window = @import("Window.zig");
 
-const Allocator = @import("Renderer/Allocator.zig");
 const Instance = @import("Renderer/Instance.zig");
 const DebugMessenger = @import("Renderer/DebugMessenger.zig");
 const Surface = @import("Renderer/Surface.zig");
 const PhysicalDevice = @import("Renderer/PhysicalDevice.zig");
 const Device = @import("Renderer/Device.zig");
 const Swapchain = @import("Renderer/Swapchain.zig");
-const CommandHandler = @import("Renderer/CommandHandler.zig");
 const ShaderObject = @import("Renderer/ShaderObject.zig");
 const Buffer = @import("Renderer/Buffer.zig");
 const Image = @import("Renderer/Image.zig");
 const TextureTable = @import("Renderer/TextureTable.zig");
 
-gpa_impl: *Allocator,
 gpa: std.mem.Allocator,
 
 texture_table: TextureTable,
@@ -36,7 +33,17 @@ physical_device: PhysicalDevice,
 device: Device,
 // vma: Vma,
 swapchain: Swapchain,
-command_handler: CommandHandler,
+
+frames: [frames_in_flight]FrameData,
+frame_index: usize,
+
+pub const frames_in_flight = 3;
+
+pub const FrameData = struct {
+    command_buffer: vk.CommandBuffer,
+    image_available: vk.Semaphore,
+    in_flight_fence: vk.Fence,
+};
 
 const libvulkan = switch (builtin.os.tag) {
     .windows => "vulkan-1.dll",
@@ -83,9 +90,7 @@ pub fn init(allocator: std.mem.Allocator, window: *Window) !Renderer {
         vk.extensions.ext_shader_object.name,
     };
 
-    const gpa_impl = try Allocator.init(allocator);
-    errdefer allocator.destroy(gpa_impl);
-    const gpa = gpa_impl.allocator();
+    const gpa = allocator;
 
     var extensions: std.ArrayList([*:0]const u8) = try .initCapacity(gpa, debug_instance_extensions.len + 4);
     defer extensions.deinit(gpa);
@@ -100,11 +105,11 @@ pub fn init(allocator: std.mem.Allocator, window: *Window) !Renderer {
     const instance: Instance = try .init(gpa, vkb, layers, extensions.items);
     errdefer instance.deinit(gpa);
 
-    const debug_messenger: DebugMessenger = try .init(gpa, instance);
-    errdefer debug_messenger.deinit(gpa, instance);
+    const debug_messenger: DebugMessenger = try .init(instance);
+    errdefer debug_messenger.deinit(instance);
 
-    const surface: Surface = try .init(gpa, instance, window);
-    errdefer surface.deinit(gpa, instance);
+    const surface: Surface = try .init(instance, window);
+    errdefer surface.deinit(instance);
 
     const physical_device: PhysicalDevice = try .pick(gpa, instance, surface);
     const device: Device = try .init(gpa, instance, physical_device, device_extensions);
@@ -114,18 +119,31 @@ pub fn init(allocator: std.mem.Allocator, window: *Window) !Renderer {
     try swapchain.create(gpa, instance, surface, physical_device, device, window.size);
     errdefer swapchain.deinit(gpa, device);
 
-    const command_handler: CommandHandler = try .init(gpa, physical_device, device);
-    errdefer command_handler.deinit(gpa, device);
+    var frames: [frames_in_flight]FrameData = undefined;
+    for (&frames) |*frame| {
+        const create_info: *const vk.CommandBufferAllocateInfo = &.{
+            .command_pool = device.command_pool,
+            .level = .primary,
+            .command_buffer_count = 1,
+        };
+        try device.proxy.allocateCommandBuffers(create_info, @ptrCast(&frame.command_buffer));
+
+        frame.image_available = try device.proxy.createSemaphore(&.{}, null);
+
+        const fence_create_info: *const vk.FenceCreateInfo = &.{
+            .flags = .{ .signaled_bit = true },
+        };
+        frame.in_flight_fence = try device.proxy.createFence(fence_create_info, null);
+    }
 
     var texture_table: TextureTable = .{};
-    _ = try texture_table.createTexture(gpa, device, physical_device, &command_handler, .{
+    _ = try texture_table.createTexture(device, physical_device, .{
         .width = 1,
         .height = 1,
         .data = &.{ 255, 255, 255, 255 },
     });
 
     return .{
-        .gpa_impl = gpa_impl,
         .gpa = gpa,
 
         .texture_table = texture_table,
@@ -139,7 +157,8 @@ pub fn init(allocator: std.mem.Allocator, window: *Window) !Renderer {
         .physical_device = physical_device,
         .device = device,
         .swapchain = swapchain,
-        .command_handler = command_handler,
+        .frames = frames,
+        .frame_index = 0,
     };
 }
 
@@ -150,14 +169,16 @@ pub fn deinit(self: *Renderer) void {
 
     device.proxy.deviceWaitIdle() catch unreachable;
 
-    self.texture_table.deinit(gpa, device);
-    self.command_handler.deinit(gpa, device);
+    self.texture_table.deinit(device);
+    for (&self.frames) |*frame| {
+        device.proxy.destroySemaphore(frame.image_available, null);
+        device.proxy.destroyFence(frame.in_flight_fence, null);
+    }
     self.swapchain.deinit(gpa, device);
     device.deinit(gpa);
-    self.surface.deinit(gpa, instance);
-    self.debug_messenger.deinit(gpa, instance);
+    self.surface.deinit(instance);
+    self.debug_messenger.deinit(instance);
     instance.deinit(gpa);
-    self.gpa_impl.deinit();
 
     self.dynlib.close();
     self.* = undefined;
@@ -166,7 +187,7 @@ pub fn deinit(self: *Renderer) void {
 pub fn submit(self: *Renderer, frame: Frame) !void {
     const device = self.device;
     const swapchain = self.swapchain;
-    const frame_data = self.command_handler.frames[self.command_handler.frame_index % CommandHandler.frames_in_flight];
+    const frame_data = self.frames[self.frame_index % frames_in_flight];
 
     const wait_semaphores: []const vk.Semaphore = &.{
         frame_data.image_available,
@@ -205,7 +226,7 @@ pub fn submit(self: *Renderer, frame: Frame) !void {
         else => return err,
     };
 
-    self.command_handler.frame_index += 1;
+    self.frame_index += 1;
 }
 
 pub fn resize(self: *Renderer, size: Window.Size) !void {
@@ -219,12 +240,11 @@ pub fn resize(self: *Renderer, size: Window.Size) !void {
         self.physical_device,
         self.device,
         size,
-        self.command_handler.frame_index,
+        self.frame_index,
     );
 }
 
 pub const Frame = struct {
-    device: Device,
     image: vk.Image,
     command_buffer: vk.CommandBuffer,
 
@@ -238,7 +258,7 @@ pub const Frame = struct {
 
         try renderer.resize(size);
 
-        const frame = renderer.command_handler.frames[renderer.command_handler.frame_index % CommandHandler.frames_in_flight];
+        const frame = renderer.frames[renderer.frame_index % frames_in_flight];
 
         _ = try device.proxy.waitForFences(
             &.{frame.in_flight_fence},
@@ -251,22 +271,29 @@ pub const Frame = struct {
         swapchain.drain(
             renderer.gpa,
             device,
-            renderer.command_handler.frame_index,
+            renderer.frame_index,
+            frames_in_flight,
         );
 
-        const result = device.wrapper.dispatch.vkAcquireNextImageKHR.?(
-            device.handle,
+        const acquired = device.proxy.acquireNextImageKHR(
             swapchain.handle,
             std.math.maxInt(u64),
             frame.image_available,
             .null_handle,
-            &swapchain.image_index,
-        );
+        ) catch |err| switch (err) {
+            error.OutOfDateKHR => {
+                try renderer.resize(size);
+                return error.SwapchainOutOfDate;
+            },
+            else => return err,
+        };
 
-        if (result == .error_out_of_date_khr or result == .suboptimal_khr) {
+        if (acquired.result == .suboptimal_khr) {
             try renderer.resize(size);
             return error.SwapchainOutOfDate;
         }
+
+        swapchain.image_index = acquired.image_index;
 
         const image = swapchain.images[swapchain.image_index];
 
@@ -388,14 +415,12 @@ pub const Frame = struct {
         device.proxy.cmdBindShadersEXT(frame.command_buffer, &.{.{ .fragment_bit = true }}, null);
 
         return .{
-            .device = device,
             .image = image,
             .command_buffer = frame.command_buffer,
         };
     }
 
-    pub fn end(self: Frame) !void {
-        const device = self.device;
+    pub fn end(self: Frame, device: Device) !void {
         const command_buffer = self.command_buffer;
 
         device.proxy.cmdEndRendering(command_buffer);
@@ -430,8 +455,7 @@ pub const Frame = struct {
         try device.proxy.endCommandBuffer(command_buffer);
     }
 
-    pub fn bindDefaultState(self: Frame) void {
-        const device = self.device;
+    pub fn bindDefaultState(self: Frame, device: Device) void {
         const command_buffer = self.command_buffer;
 
         // rasterizer
@@ -515,56 +539,32 @@ pub const Frame = struct {
         fill_rectangle_nv,
     };
 
-    pub fn setPolygonMode(self: Frame, mode: PolygonMode) void {
+    pub fn setPolygonMode(self: Frame, device: Device, mode: PolygonMode) void {
         const mode_enum = std.meta.activeTag(mode);
-        self.device.proxy.cmdSetPolygonModeEXT(self.command_buffer, mode_enum);
+        device.proxy.cmdSetPolygonModeEXT(self.command_buffer, mode_enum);
 
         switch (mode) {
-            .line => |line| self.device.proxy.cmdSetLineWidth(self.command_buffer, line.width),
+            .line => |line| device.proxy.cmdSetLineWidth(self.command_buffer, line.width),
             else => {},
         }
     }
 
-    pub const CullMode = enum(vk.Flags) {
-        front = 0,
-        back = 1,
-    };
-
-    pub fn setCullMode(self: Frame, mode: CullMode) void {
-        self.device.proxy.cmdSetCullMode(self.command_buffer, @bitCast(@intFromEnum(mode)));
+    pub fn setCullMode(self: Frame, device: Device, mode: vk.CullModeFlags) void {
+        device.proxy.cmdSetCullMode(self.command_buffer, mode);
     }
 };
 
-pub const ShaderStage = enum(vk.Flags) {
-    none = 0x00000000,
-    vertex = 0x00000001,
-    tessellation_control = 0x00000002,
-    tessellation_evaluation = 0x00000004,
-    geometry = 0x00000008,
-    fragment = 0x00000010,
-    compute = 0x00000020,
-
-    pub const Mask = packed struct(vk.Flags) {
-        vertex: bool = false,
-        tessellation_control: bool = false,
-        tessellation_evaluation: bool = false,
-        geometry: bool = false,
-        fragment: bool = false,
-        compute: bool = false,
-        _pad: u26 = 0,
-    };
-};
-
-pub fn Shader(stage: ShaderStage) type {
-    const default_next_stage: ShaderStage = switch (stage) {
-        .none => .none,
-        .vertex => .fragment,
-        .tessellation_control => .tessellation_evaluation,
-        .tessellation_evaluation => .geometry,
-        .geometry => .fragment,
-        .fragment => .none,
-        .compute => .none,
-    };
+pub fn Shader(stage: vk.ShaderStageFlags) type {
+    const default_next_stage: vk.ShaderStageFlags = if (stage.vertex_bit)
+        .{ .fragment_bit = true }
+    else if (stage.tessellation_control_bit)
+        .{ .tessellation_evaluation_bit = true }
+    else if (stage.tessellation_evaluation_bit)
+        .{ .geometry_bit = true }
+    else if (stage.geometry_bit)
+        .{ .fragment_bit = true }
+    else
+        .{};
 
     return struct {
         const Self = @This();
@@ -572,14 +572,14 @@ pub fn Shader(stage: ShaderStage) type {
         object: ShaderObject,
 
         pub const InitOptions = struct {
-            next_stage: ShaderStage = default_next_stage,
+            next_stage: vk.ShaderStageFlags = default_next_stage,
             entry_name: [*:0]const u8 = "main",
         };
 
         pub const InitError = ShaderObject.InitError;
 
-        pub fn initFromSlice(renderer: Renderer, source: []const u8, options: InitOptions) InitError!Self {
-            const shader_object: ShaderObject = try .init(renderer.gpa, renderer.device, .{
+        pub fn initFromSlice(device: Device, source: []const u8, options: InitOptions) InitError!Self {
+            const shader_object: ShaderObject = try .init(device, .{
                 .stage = stage,
                 .next_stage = options.next_stage,
                 .source = source,
@@ -589,10 +589,10 @@ pub fn Shader(stage: ShaderStage) type {
             return .{ .object = shader_object };
         }
 
-        pub fn initFromSliceWithPushConstants(renderer: Renderer, source: []const u8, options: InitOptions, push_constant_range: PushConstantRange) InitError!Self {
-            const shader_object: ShaderObject = try .init(renderer.gpa, renderer.device, .{
-                .stage = @bitCast(@intFromEnum(stage)),
-                .next_stage = @bitCast(@intFromEnum(options.next_stage)),
+        pub fn initFromSliceWithPushConstants(device: Device, source: []const u8, options: InitOptions, push_constant_range: PushConstantRange) InitError!Self {
+            const shader_object: ShaderObject = try .init(device, .{
+                .stage = stage,
+                .next_stage = options.next_stage,
                 .source = source,
                 .entry_name = options.entry_name,
                 .push_constant_ranges = &.{push_constant_range},
@@ -601,14 +601,14 @@ pub fn Shader(stage: ShaderStage) type {
             return .{ .object = shader_object };
         }
 
-        pub fn deinit(self: Self, renderer: Renderer) void {
-            self.object.deinit(renderer.gpa, renderer.device);
+        pub fn deinit(self: Self, device: Device) void {
+            self.object.deinit(device);
         }
 
-        pub fn bind(self: Self, frame: Frame) void {
-            frame.device.proxy.cmdBindShadersEXT(
+        pub fn bind(self: Self, device: Device, frame: Frame) void {
+            device.proxy.cmdBindShadersEXT(
                 frame.command_buffer,
-                &.{@bitCast(@intFromEnum(stage))},
+                &.{stage},
                 &.{self.object.handle},
             );
         }
@@ -616,7 +616,7 @@ pub fn Shader(stage: ShaderStage) type {
 }
 
 pub const PushConstantRange = vk.PushConstantRange;
-pub fn PushConstant(comptime Value: type, shader_stages: ShaderStage.Mask) type {
+pub fn PushConstant(comptime Value: type, shader_stages: vk.ShaderStageFlags) type {
     switch (@typeInfo(Value)) {
         .@"struct" => |s| {
             if (s.layout != .@"extern") @compileError("expected extern struct layout for push constants, found '" ++ @tagName(s.layout) ++ "' in '" ++ @typeName(Value) ++ "'");
@@ -627,7 +627,7 @@ pub fn PushConstant(comptime Value: type, shader_stages: ShaderStage.Mask) type 
     }
 
     const range: vk.PushConstantRange = .{
-        .stage_flags = @bitCast(shader_stages),
+        .stage_flags = shader_stages,
         .offset = 0,
         .size = @sizeOf(Value),
     };
@@ -637,26 +637,23 @@ pub fn PushConstant(comptime Value: type, shader_stages: ShaderStage.Mask) type 
 
         layout: vk.PipelineLayout,
 
-        comptime stages: ShaderStage.Mask = shader_stages,
-        comptime range: vk.PushConstantRange = range,
-
-        pub fn init(renderer: Renderer) !Self {
+        pub fn init(device: Device) !Self {
             const layout_create_info = vk.PipelineLayoutCreateInfo{
                 .push_constant_range_count = 1,
                 .p_push_constant_ranges = @ptrCast(&range),
             };
 
-            const layout = try renderer.device.proxy.createPipelineLayout(&layout_create_info, @ptrCast(@alignCast(renderer.gpa.ptr)));
+            const layout = try device.proxy.createPipelineLayout(&layout_create_info, null);
 
             return .{ .layout = layout };
         }
 
-        pub fn deinit(self: Self, renderer: Renderer) void {
-            renderer.device.proxy.destroyPipelineLayout(self.layout, @ptrCast(@alignCast(renderer.gpa.ptr)));
+        pub fn deinit(self: Self, device: Device) void {
+            device.proxy.destroyPipelineLayout(self.layout, null);
         }
 
-        pub fn push(self: Self, frame: Frame, value: Value) void {
-            frame.device.proxy.cmdPushConstants(
+        pub fn push(self: Self, device: Device, frame: Frame, value: Value) void {
+            device.proxy.cmdPushConstants(
                 frame.command_buffer,
                 self.layout,
                 range.stage_flags,
@@ -750,13 +747,27 @@ pub fn Mesh(streams: []const type, opt_index_type: ?type) type {
             primitive_restart: bool = false,
         };
 
-        pub fn init(renderer: Renderer, desc: Description) !Self {
+        pub fn init(physical_device: PhysicalDevice, device: Device, desc: Description) !Self {
             var buffers: [streams.len]Buffer = undefined;
             inline for (streams, 0..) |T, i| {
-                buffers[i] = try .init(T, renderer.gpa, renderer.physical_device, renderer.device, .vertex, desc.vertices[i]);
+                buffers[i] = try .init(
+                    T,
+                    physical_device,
+                    device,
+                    .{ .vertex_buffer_bit = true },
+                    .{ .host_visible_bit = true, .host_coherent_bit = true },
+                    desc.vertices[i],
+                );
             }
 
-            const index_buffer = if (has_indices) try Buffer.init(IndexType, renderer.gpa, renderer.physical_device, renderer.device, .index, desc.indices) else void{};
+            const index_buffer = if (has_indices) try Buffer.init(
+                IndexType,
+                physical_device,
+                device,
+                .{ .index_buffer_bit = true },
+                .{ .host_visible_bit = true, .host_coherent_bit = true },
+                desc.indices,
+            ) else void{};
 
             const count: u32 = @truncate(if (has_indices) desc.indices.len else desc.vertices[0].len);
 
@@ -769,14 +780,14 @@ pub fn Mesh(streams: []const type, opt_index_type: ?type) type {
             };
         }
 
-        pub fn deinit(self: Self, renderer: Renderer) void {
-            renderer.device.proxy.deviceWaitIdle() catch {};
-            if (has_indices) self.index_buffer.deinit(renderer.gpa, renderer.device);
-            for (self.buffers) |buffer| buffer.deinit(renderer.gpa, renderer.device);
+        pub fn deinit(self: Self, device: Device) void {
+            device.proxy.deviceWaitIdle() catch {};
+            if (has_indices) self.index_buffer.deinit(device);
+            for (self.buffers) |buffer| buffer.deinit(device);
         }
 
-        pub fn bind(self: Self, frame: Frame) void {
-            frame.device.proxy.cmdSetVertexInputEXT(
+        pub fn bind(self: Self, device: Device, frame: Frame) void {
+            device.proxy.cmdSetVertexInputEXT(
                 frame.command_buffer,
                 bindings[0..],
                 attributes[0..],
@@ -789,14 +800,14 @@ pub fn Mesh(streams: []const type, opt_index_type: ?type) type {
 
             const offsets: [streams.len]vk.DeviceSize = @splat(0);
 
-            frame.device.proxy.cmdBindVertexBuffers(
+            device.proxy.cmdBindVertexBuffers(
                 frame.command_buffer,
                 0,
                 &handles,
                 &offsets,
             );
 
-            if (has_indices) frame.device.proxy.cmdBindIndexBuffer(
+            if (has_indices) device.proxy.cmdBindIndexBuffer(
                 frame.command_buffer,
                 self.index_buffer.handle,
                 0,
@@ -809,21 +820,21 @@ pub fn Mesh(streams: []const type, opt_index_type: ?type) type {
             );
         }
 
-        pub fn draw(self: Self, frame: Frame) void {
-            frame.device.proxy.cmdSetPrimitiveTopology(
+        pub fn draw(self: Self, device: Device, frame: Frame) void {
+            device.proxy.cmdSetPrimitiveTopology(
                 frame.command_buffer,
                 self.topology,
             );
 
-            frame.device.proxy.cmdSetPrimitiveRestartEnable(
+            device.proxy.cmdSetPrimitiveRestartEnable(
                 frame.command_buffer,
                 @enumFromInt(@intFromBool(self.primitive_restart)),
             );
 
             if (has_indices) {
-                frame.device.proxy.cmdDrawIndexed(frame.command_buffer, self.count, 1, 0, 0, 0);
+                device.proxy.cmdDrawIndexed(frame.command_buffer, self.count, 1, 0, 0, 0);
             } else {
-                frame.device.proxy.cmdDraw(frame.command_buffer, self.count, 1, 0, 0);
+                device.proxy.cmdDraw(frame.command_buffer, self.count, 1, 0, 0);
             }
         }
 
@@ -851,4 +862,11 @@ pub fn Mesh(streams: []const type, opt_index_type: ?type) type {
             }
         }
     };
+}
+
+test {
+    const V = extern struct { pos: [2]f32 };
+    _ = Mesh(&.{V}, u16);
+    _ = Shader(.{ .vertex_bit = true });
+    _ = PushConstant(extern struct { x: f32 }, .{ .vertex_bit = true });
 }

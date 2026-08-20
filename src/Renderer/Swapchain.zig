@@ -26,7 +26,6 @@ extent: vk.Extent2D = undefined,
 
 graveyard: [graveyard_size]Zombie = @splat(.{}),
 
-const frames_in_flight = 3;
 const graveyard_size = 6;
 
 pub const Zombie = struct {
@@ -44,10 +43,10 @@ pub const Zombie = struct {
     valid: bool = false,
 
     pub fn deinit(self: *Zombie, gpa: std.mem.Allocator, device: Device) void {
-        for (self.image_views) |image_view| device.proxy.destroyImageView(image_view, @ptrCast(@alignCast(gpa.ptr)));
-        for (self.finished) |semaphore| device.proxy.destroySemaphore(semaphore, @ptrCast(@alignCast(gpa.ptr)));
-        if (self.depth) |*depth| depth.deinit(gpa, device);
-        if (self.handle != .null_handle) device.proxy.destroySwapchainKHR(self.handle, @ptrCast(@alignCast(gpa.ptr)));
+        for (self.image_views) |image_view| device.proxy.destroyImageView(image_view, null);
+        for (self.finished) |semaphore| device.proxy.destroySemaphore(semaphore, null);
+        if (self.depth) |*depth| depth.deinit(device);
+        if (self.handle != .null_handle) device.proxy.destroySwapchainKHR(self.handle, null);
 
         gpa.free(self.finished);
         gpa.free(self.image_views);
@@ -63,7 +62,7 @@ pub const Depth = struct {
     memory: vk.DeviceMemory,
     format: vk.Format,
 
-    pub fn init(gpa: std.mem.Allocator, instance: Instance, physical_device: PhysicalDevice, device: Device, size: Size) !Depth {
+    pub fn init(instance: Instance, physical_device: PhysicalDevice, device: Device, size: Size) !Depth {
         const format = getFormat(instance, physical_device);
 
         const image_create_info: *const vk.ImageCreateInfo = &.{
@@ -87,8 +86,8 @@ pub const Depth = struct {
             .initial_layout = .undefined,
         };
 
-        const image = try device.proxy.createImage(image_create_info, @ptrCast(@alignCast(gpa.ptr)));
-        errdefer device.proxy.destroyImage(image, @ptrCast(@alignCast(gpa.ptr)));
+        const image = try device.proxy.createImage(image_create_info, null);
+        errdefer device.proxy.destroyImage(image, null);
 
         const requirements = device.proxy.getImageMemoryRequirements(image);
 
@@ -101,8 +100,8 @@ pub const Depth = struct {
             ),
         };
 
-        const memory = try device.proxy.allocateMemory(&allocate_info, @ptrCast(@alignCast(gpa.ptr)));
-        errdefer device.proxy.freeMemory(memory, @ptrCast(@alignCast(gpa.ptr)));
+        const memory = try device.proxy.allocateMemory(&allocate_info, null);
+        errdefer device.proxy.freeMemory(memory, null);
 
         try device.proxy.bindImageMemory(image, memory, 0);
 
@@ -130,7 +129,7 @@ pub const Depth = struct {
             },
         };
 
-        const image_view = try device.proxy.createImageView(image_view_create_info, @ptrCast(@alignCast(gpa.ptr)));
+        const image_view = try device.proxy.createImageView(image_view_create_info, null);
 
         return .{
             .image = image,
@@ -140,10 +139,10 @@ pub const Depth = struct {
         };
     }
 
-    pub fn deinit(self: *Depth, gpa: std.mem.Allocator, device: Device) void {
-        device.proxy.destroyImage(self.image, @ptrCast(@alignCast(gpa.ptr)));
-        device.proxy.destroyImageView(self.image_view, @ptrCast(@alignCast(gpa.ptr)));
-        device.proxy.freeMemory(self.memory, @ptrCast(@alignCast(gpa.ptr)));
+    pub fn deinit(self: *Depth, device: Device) void {
+        device.proxy.destroyImage(self.image, null);
+        device.proxy.destroyImageView(self.image_view, null);
+        device.proxy.freeMemory(self.memory, null);
         self.* = undefined;
     }
 
@@ -244,8 +243,8 @@ fn build(
         .old_swapchain = old_handle,
     };
 
-    const handle = try device.proxy.createSwapchainKHR(&create_info, @ptrCast(@alignCast(gpa.ptr)));
-    errdefer device.proxy.destroySwapchainKHR(handle, @ptrCast(@alignCast(gpa.ptr)));
+    const handle = try device.proxy.createSwapchainKHR(&create_info, null);
+    errdefer device.proxy.destroySwapchainKHR(handle, null);
 
     var actual_image_count: u32 = 0;
 
@@ -269,7 +268,7 @@ fn build(
     var created_views: usize = 0;
 
     errdefer {
-        for (image_views[0..created_views]) |view| device.proxy.destroyImageView(view, @ptrCast(@alignCast(gpa.ptr)));
+        for (image_views[0..created_views]) |view| device.proxy.destroyImageView(view, null);
         gpa.free(image_views);
     }
 
@@ -290,7 +289,7 @@ fn build(
             },
         };
 
-        image_view.* = try device.proxy.createImageView(&info, @ptrCast(@alignCast(gpa.ptr)));
+        image_view.* = try device.proxy.createImageView(&info, null);
 
         created_views += 1;
     }
@@ -300,19 +299,19 @@ fn build(
     var created_semaphores: usize = 0;
 
     errdefer {
-        for (finished[0..created_semaphores]) |semaphore| device.proxy.destroySemaphore(semaphore, @ptrCast(@alignCast(gpa.ptr)));
+        for (finished[0..created_semaphores]) |semaphore| device.proxy.destroySemaphore(semaphore, null);
         gpa.free(finished);
     }
 
     const semaphore_info: vk.SemaphoreCreateInfo = .{};
 
     for (finished) |*semaphore| {
-        semaphore.* = try device.proxy.createSemaphore(&semaphore_info, @ptrCast(@alignCast(gpa.ptr)));
+        semaphore.* = try device.proxy.createSemaphore(&semaphore_info, null);
 
         created_semaphores += 1;
     }
 
-    const depth: Depth = try .init(gpa, instance, physical_device, device, .{
+    const depth: Depth = try .init(instance, physical_device, device, .{
         .width = extent.width,
         .height = extent.height,
     });
@@ -347,10 +346,11 @@ pub fn drain(
     gpa: std.mem.Allocator,
     device: Device,
     accumulated_frame_index: u64,
+    retire_after: u64,
 ) void {
     for (&swapchain.graveyard) |*zombie| {
         if (!zombie.valid) continue;
-        if (accumulated_frame_index - zombie.frame_retired < frames_in_flight) continue;
+        if (accumulated_frame_index - zombie.frame_retired < retire_after) continue;
 
         zombie.deinit(gpa, device);
     }
@@ -449,12 +449,12 @@ pub fn deinit(self: *Swapchain, gpa: std.mem.Allocator, device: Device) void {
         zombie.deinit(gpa, device);
     }
 
-    for (self.image_views) |image_view| device.proxy.destroyImageView(image_view, @ptrCast(@alignCast(gpa.ptr)));
-    for (self.finished) |semaphore| device.proxy.destroySemaphore(semaphore, @ptrCast(@alignCast(gpa.ptr)));
+    for (self.image_views) |image_view| device.proxy.destroyImageView(image_view, null);
+    for (self.finished) |semaphore| device.proxy.destroySemaphore(semaphore, null);
 
-    self.depth.deinit(gpa, device);
+    self.depth.deinit(device);
 
-    if (self.handle != .null_handle) device.proxy.destroySwapchainKHR(self.handle, @ptrCast(@alignCast(gpa.ptr)));
+    if (self.handle != .null_handle) device.proxy.destroySwapchainKHR(self.handle, null);
 
     gpa.free(self.finished);
     gpa.free(self.image_views);

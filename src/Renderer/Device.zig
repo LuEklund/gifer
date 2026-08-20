@@ -6,10 +6,9 @@ const vk = @import("vulkan");
 const Instance = @import("Instance.zig");
 const PhysicalDevice = @import("PhysicalDevice.zig");
 
-handle: vk.Device,
-wrapper: *vk.DeviceWrapper,
 proxy: vk.DeviceProxy,
 graphics_queue: vk.Queue,
+command_pool: vk.CommandPool,
 
 pub fn init(gpa: std.mem.Allocator, instance: Instance, physical_device: PhysicalDevice, extensions: []const [*:0]const u8) !Device {
     const properties = try instance.proxy.enumerateDeviceExtensionPropertiesAlloc(physical_device.handle, null, gpa);
@@ -74,25 +73,59 @@ pub fn init(gpa: std.mem.Allocator, instance: Instance, physical_device: Physica
         .pp_enabled_extension_names = extensions.ptr,
     };
 
-    const handle = try instance.proxy.createDevice(physical_device.handle, create_info, @ptrCast(@alignCast(gpa.ptr)));
+    const handle = try instance.proxy.createDevice(physical_device.handle, create_info, null);
 
     const wrapper = try gpa.create(vk.DeviceWrapper);
     errdefer gpa.destroy(wrapper);
 
-    wrapper.* = .load(handle, instance.wrapper.dispatch.vkGetDeviceProcAddr.?);
+    wrapper.* = .load(handle, instance.proxy.wrapper.dispatch.vkGetDeviceProcAddr.?);
     const proxy: vk.DeviceProxy = .init(handle, wrapper);
 
     const graphics_queue = proxy.getDeviceQueue(physical_device.graphics_queue_family_index, 0);
 
+    const command_pool_create_info: *const vk.CommandPoolCreateInfo = &.{
+        .flags = .{ .reset_command_buffer_bit = true },
+        .queue_family_index = physical_device.graphics_queue_family_index,
+    };
+    const command_pool = try proxy.createCommandPool(command_pool_create_info, null);
+
     return .{
-        .handle = handle,
-        .wrapper = wrapper,
         .proxy = proxy,
         .graphics_queue = graphics_queue,
+        .command_pool = command_pool,
     };
 }
 
 pub fn deinit(self: Device, gpa: std.mem.Allocator) void {
-    self.proxy.destroyDevice(@ptrCast(@alignCast(gpa.ptr)));
-    gpa.destroy(self.wrapper);
+    self.proxy.destroyCommandPool(self.command_pool, null);
+    self.proxy.destroyDevice(null);
+    gpa.destroy(self.proxy.wrapper);
+}
+
+pub fn beginImmediate(self: Device) !vk.CommandBuffer {
+    var cmd: vk.CommandBuffer = undefined;
+    try self.proxy.allocateCommandBuffers(&.{
+        .command_pool = self.command_pool,
+        .level = .primary,
+        .command_buffer_count = 1,
+    }, @ptrCast(&cmd));
+    try self.proxy.beginCommandBuffer(cmd, &.{ .flags = .{
+        .one_time_submit_bit = true,
+    } });
+    return cmd;
+}
+
+pub fn endImmediate(self: Device, cmd: vk.CommandBuffer) !void {
+    try self.proxy.endCommandBuffer(cmd);
+    try self.proxy.queueSubmit(
+        self.graphics_queue,
+        &.{.{
+            .command_buffer_count = 1,
+            .p_command_buffers = @ptrCast(&cmd),
+        }},
+        .null_handle,
+    );
+
+    try self.proxy.queueWaitIdle(self.graphics_queue);
+    self.proxy.freeCommandBuffers(self.command_pool, &.{cmd});
 }

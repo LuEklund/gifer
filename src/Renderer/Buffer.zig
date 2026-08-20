@@ -1,6 +1,5 @@
 const Buffer = @This();
 
-const std = @import("std");
 const vk = @import("vulkan");
 
 const PhysicalDevice = @import("PhysicalDevice.zig");
@@ -8,31 +7,28 @@ const Device = @import("Device.zig");
 
 handle: vk.Buffer,
 memory: vk.DeviceMemory,
-usage: Usage,
 
-pub const Usage = enum(vk.Flags) {
-    staging = 0x00000001,
-    uniform = 0x00000010,
-    storage = 0x00000020,
-    index = 0x00000040,
-    vertex = 0x00000080,
-    indirect = 0x00000100,
-};
-
-pub fn init(comptime T: type, gpa: std.mem.Allocator, physical_device: PhysicalDevice, device: Device, usage: Usage, data: []const T) !Buffer {
+pub fn init(
+    comptime T: type,
+    physical_device: PhysicalDevice,
+    device: Device,
+    usage: vk.BufferUsageFlags,
+    memory_properties: vk.MemoryPropertyFlags,
+    data: []const T,
+) !Buffer {
     const create_info: *const vk.BufferCreateInfo = &.{
         .size = data.len * @sizeOf(T),
-        .usage = @bitCast(@intFromEnum(usage)),
+        .usage = usage,
         .sharing_mode = .exclusive,
     };
 
-    const handle = try device.proxy.createBuffer(create_info, @ptrCast(@alignCast(gpa.ptr)));
+    const handle = try device.proxy.createBuffer(create_info, null);
 
     const requirements = device.proxy.getBufferMemoryRequirements(handle);
 
     const memory_type = PhysicalDevice.findMemoryType(
         requirements.memory_type_bits,
-        .{ .host_visible_bit = true, .host_coherent_bit = true },
+        memory_properties,
         physical_device.memory_properties,
     );
 
@@ -41,7 +37,7 @@ pub fn init(comptime T: type, gpa: std.mem.Allocator, physical_device: PhysicalD
         .memory_type_index = memory_type,
     };
 
-    const memory = try device.proxy.allocateMemory(memory_allocate_info, @ptrCast(@alignCast(gpa.ptr)));
+    const memory = try device.proxy.allocateMemory(memory_allocate_info, null);
 
     try device.proxy.bindBufferMemory(handle, memory, 0);
 
@@ -55,13 +51,12 @@ pub fn init(comptime T: type, gpa: std.mem.Allocator, physical_device: PhysicalD
     return .{
         .handle = handle,
         .memory = memory,
-        .usage = usage,
     };
 }
 
-pub fn deinit(self: Buffer, gpa: std.mem.Allocator, device: Device) void {
-    device.proxy.destroyBuffer(self.handle, @ptrCast(@alignCast(gpa.ptr)));
-    device.proxy.freeMemory(self.memory, @ptrCast(@alignCast(gpa.ptr)));
+pub fn deinit(self: Buffer, device: Device) void {
+    device.proxy.destroyBuffer(self.handle, null);
+    device.proxy.freeMemory(self.memory, null);
 }
 
 pub fn getAddress(self: Buffer, device: Device) vk.DeviceAddress {

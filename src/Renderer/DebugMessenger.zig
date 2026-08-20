@@ -7,11 +7,11 @@ const Instance = @import("Instance.zig");
 
 handle: vk.DebugUtilsMessengerEXT,
 
-pub fn init(gpa: std.mem.Allocator, instance: Instance) vk.InstanceWrapper.CreateDebugUtilsMessengerEXTError!DebugMessenger {
+pub fn init(instance: Instance) vk.InstanceWrapper.CreateDebugUtilsMessengerEXTError!DebugMessenger {
     const create_info: *const vk.DebugUtilsMessengerCreateInfoEXT = &.{
         .message_severity = .{
-            // .verbose_bit_ext = true,
-            // .info_bit_ext = true,
+            .verbose_bit_ext = true,
+            .info_bit_ext = true,
             .warning_bit_ext = true,
             .error_bit_ext = true,
         },
@@ -24,12 +24,12 @@ pub fn init(gpa: std.mem.Allocator, instance: Instance) vk.InstanceWrapper.Creat
         .p_user_data = null,
     };
 
-    const handle = try instance.proxy.createDebugUtilsMessengerEXT(create_info, @ptrCast(@alignCast(gpa.ptr)));
+    const handle = try instance.proxy.createDebugUtilsMessengerEXT(create_info, null);
     return .{ .handle = handle };
 }
 
-pub fn deinit(self: DebugMessenger, gpa: std.mem.Allocator, instance: Instance) void {
-    instance.proxy.destroyDebugUtilsMessengerEXT(self.handle, @ptrCast(@alignCast(gpa.ptr)));
+pub fn deinit(self: DebugMessenger, instance: Instance) void {
+    instance.proxy.destroyDebugUtilsMessengerEXT(self.handle, null);
 }
 
 fn callback(

@@ -3,8 +3,6 @@ const Instance = @This();
 const std = @import("std");
 const vk = @import("vulkan");
 
-handle: vk.Instance,
-wrapper: *vk.InstanceWrapper,
 proxy: vk.InstanceProxy,
 
 pub const api_version = vk.makeApiVersion(0, 1, 3, 0);
@@ -63,7 +61,7 @@ pub fn init(
         return error.VulkanVersionTooOld;
     }
 
-    const handle = vkb.createInstance(create_info, @ptrCast(@alignCast(gpa.ptr))) catch |err| return switch (err) {
+    const handle = vkb.createInstance(create_info, null) catch |err| return switch (err) {
         error.LayerNotPresent => Instance.init(gpa, vkb, &.{}, extensions),
         else => err,
     };
@@ -75,13 +73,11 @@ pub fn init(
     const proxy: vk.InstanceProxy = .init(handle, wrapper);
 
     return .{
-        .handle = handle,
-        .wrapper = wrapper,
         .proxy = proxy,
     };
 }
 
 pub fn deinit(self: Instance, gpa: std.mem.Allocator) void {
-    self.proxy.destroyInstance(@ptrCast(@alignCast(gpa.ptr)));
-    gpa.destroy(self.wrapper);
+    self.proxy.destroyInstance(null);
+    gpa.destroy(self.proxy.wrapper);
 }

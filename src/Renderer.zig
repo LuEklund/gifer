@@ -22,8 +22,6 @@ const TextureTable = @import("Renderer/TextureTable.zig");
 
 gpa: std.mem.Allocator,
 
-texture_table: TextureTable,
-
 dynlib: DynLib,
 
 vkb: vk.BaseWrapper,
@@ -33,6 +31,10 @@ surface: Surface,
 physical_device: PhysicalDevice,
 device: Device,
 swapchain: Swapchain,
+
+texture_table: TextureTable,
+shader_obj_vert: ShaderObject,
+shader_obj_frag: ShaderObject,
 
 frames: [frames_in_flight]FrameData,
 frame_index: usize,
@@ -125,10 +127,28 @@ pub fn init(allocator: std.mem.Allocator, window: *Window) !Renderer {
         .data = &.{ 255, 255, 255, 255 },
     });
 
+    const data = @embedFile("assets/shaders/vert.spv");
+    const shader_obj_vert = try ShaderObject.init(device, .{
+        .entry_name = "vertex",
+        .source = data,
+        .stage = .{ .vertex_bit = true },
+        .next_stage = .{ .fragment_bit = true },
+        .push_constant_ranges = &.{},
+    });
+    const shader_obj_frag = try ShaderObject.init(device, .{
+        .entry_name = "fragment",
+        .source = data,
+        .stage = .{ .fragment_bit = true },
+        .next_stage = .{},
+        .push_constant_ranges = &.{},
+    });
+
     return .{
         .gpa = gpa,
 
         .texture_table = texture_table,
+        .shader_obj_vert = shader_obj_vert,
+        .shader_obj_frag = shader_obj_frag,
 
         .dynlib = dynlib,
 
@@ -185,13 +205,13 @@ pub const BeginOptions = struct {
     clear_color: [4]f32 = .{ 0.0, 0.0, 0.0, 1.0 },
 };
 
-pub fn begin(renderer: *Renderer, size: Window.Size, options: BeginOptions) !void {
-    const device = renderer.device;
-    const swapchain = &renderer.swapchain;
+pub fn begin(self: *Renderer, size: Window.Size, options: BeginOptions) !void {
+    const device = self.device;
+    const swapchain = &self.swapchain;
 
-    try renderer.resize(size);
+    try self.resize(size);
 
-    const frame_data = renderer.frames[renderer.frame_index % frames_in_flight];
+    const frame_data = self.frames[self.frame_index % frames_in_flight];
 
     _ = try device.proxy.waitForFences(
         &.{frame_data.in_flight_fence},
@@ -202,9 +222,9 @@ pub fn begin(renderer: *Renderer, size: Window.Size, options: BeginOptions) !voi
     try device.proxy.resetFences(&.{frame_data.in_flight_fence});
 
     swapchain.drain(
-        renderer.gpa,
+        self.gpa,
         device,
-        renderer.frame_index,
+        self.frame_index,
         frames_in_flight,
     );
 
@@ -215,14 +235,14 @@ pub fn begin(renderer: *Renderer, size: Window.Size, options: BeginOptions) !voi
         .null_handle,
     ) catch |err| switch (err) {
         error.OutOfDateKHR => {
-            try renderer.resize(size);
+            try self.resize(size);
             return error.SwapchainOutOfDate;
         },
         else => return err,
     };
 
     if (acquired.result == .suboptimal_khr) {
-        try renderer.resize(size);
+        try self.resize(size);
         return error.SwapchainOutOfDate;
     }
 
@@ -367,18 +387,37 @@ pub fn begin(renderer: *Renderer, size: Window.Size, options: BeginOptions) !voi
         rendering_info,
     );
 
-    device.proxy.cmdBindShadersEXT(frame_data.command_buffer, &.{.{ .vertex_bit = true }}, null);
+    device.proxy.cmdBindShadersEXT(frame_data.command_buffer, &.{.{ .vertex_bit = true }}, &.{self.shader_obj_vert.handle});
     device.proxy.cmdBindShadersEXT(frame_data.command_buffer, &.{.{ .tessellation_control_bit = true }}, null);
     device.proxy.cmdBindShadersEXT(frame_data.command_buffer, &.{.{ .tessellation_evaluation_bit = true }}, null);
     device.proxy.cmdBindShadersEXT(frame_data.command_buffer, &.{.{ .geometry_bit = true }}, null);
-    device.proxy.cmdBindShadersEXT(frame_data.command_buffer, &.{.{ .fragment_bit = true }}, null);
+    device.proxy.cmdBindShadersEXT(frame_data.command_buffer, &.{.{ .fragment_bit = true }}, &.{self.shader_obj_frag.handle});
 }
 
 pub fn draw(self: *Renderer) !void {
-    _ = self;
-    // const device = self.device;
-    //
-    // device.proxy.cmdDrawIndexed()
+    const device = self.device;
+    const frame_data = self.frames[self.frame_index % frames_in_flight];
+
+    bindDefaultState(frame_data, device);
+
+    device.proxy.cmdSetPolygonModeEXT(frame_data.command_buffer, .fill);
+    device.proxy.cmdSetPrimitiveTopology(frame_data.command_buffer, .triangle_list);
+    // device.proxy.cmdSetLineWidth(self.command_buffer, 1);
+
+    device.proxy.cmdSetPrimitiveRestartEnable(frame_data.command_buffer, .false);
+    device.proxy.cmdSetVertexInputEXT(
+        frame_data.command_buffer,
+        null,
+        null,
+    );
+
+    device.proxy.cmdDraw(
+        frame_data.command_buffer,
+        3,
+        1,
+        0,
+        0,
+    );
 }
 
 pub fn submit(self: *Renderer) !void {
@@ -459,6 +498,8 @@ pub fn submit(self: *Renderer) !void {
     self.frame_index += 1;
 }
 
+// pub fn uploadShader(self: *Renderer,
+
 pub fn bindDefaultState(self: FrameData, device: Device) void {
     const command_buffer = self.command_buffer;
 
@@ -469,7 +510,7 @@ pub fn bindDefaultState(self: FrameData, device: Device) void {
 
     device.proxy.cmdSetCullMode(
         command_buffer,
-        .{ .back_bit = true },
+        .{},
     );
     device.proxy.cmdSetFrontFace(command_buffer, .counter_clockwise);
 

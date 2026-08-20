@@ -18,7 +18,10 @@ pub fn init(gpa: std.mem.Allocator, instance: Instance, physical_device: Physica
         const name = std.mem.sliceTo(&property.extension_name, 0);
 
         if (std.mem.eql(u8, std.mem.span(extension), name)) break;
-    } else return error.MissingDeviceExtension;
+    } else {
+        std.log.debug("name: {s}", .{extension});
+        return error.MissingDeviceExtension;
+    };
 
     const features = instance.proxy.getPhysicalDeviceFeatures(physical_device.handle);
 
@@ -64,8 +67,18 @@ pub fn init(gpa: std.mem.Allocator, instance: Instance, physical_device: Physica
         .shader_sampled_image_array_non_uniform_indexing = .true,
     };
 
-    const create_info: *const vk.DeviceCreateInfo = &.{
+    // var physical_device_vulkan_12_features: vk.PhysicalDeviceVulkan12Features = .{
+    //     .p_next = &descriptor_indexing_feature,
+    //     .buffer_device_address = .true,
+    // };
+
+    var physical_device_vulkan_11_features: vk.PhysicalDeviceVulkan11Features = .{
         .p_next = &descriptor_indexing_feature,
+        .shader_draw_parameters = .true,
+    };
+
+    const create_info: *const vk.DeviceCreateInfo = &.{
+        .p_next = &physical_device_vulkan_11_features,
         .queue_create_info_count = 1,
         .p_queue_create_infos = @ptrCast(&queue_info),
         .p_enabled_features = &features,

@@ -14,21 +14,21 @@ pub const Clip = struct {
 pub fn main(init: std.process.Init) !void {
     const gpa = init.gpa;
 
-    var recording = Capture.startRecording(gpa, init.io, "/tmp/test.mp4") catch return;
-    std.debug.print("recording... press enter to stop\n", .{});
-    var buf: [8]u8 = undefined;
-    _ = try std.Io.File.stdin().readStreaming(init.io, &.{&buf});
-
-    const path = try recording.stop(init.io);
-    std.debug.print("saved: {s}\n", .{path});
-
-    var clip = try load(gpa, init.io, "/tmp/test.mp4");
-    defer {
-        for (clip.frames.items) |frame| gpa.free(frame);
-        clip.frames.deinit(gpa);
-    }
-    std.debug.print("{} frames, {}x{}\n", .{ clip.frames.items.len, clip.info.width, clip.info.height });
-
+    // var recording = Capture.startRecording(gpa, init.io, "/tmp/test.mp4") catch return;
+    // std.debug.print("recording... press enter to stop\n", .{});
+    // var buf: [8]u8 = undefined;
+    // _ = try std.Io.File.stdin().readStreaming(init.io, &.{&buf});
+    //
+    // const path = try recording.stop(init.io);
+    // std.debug.print("saved: {s}\n", .{path});
+    //
+    // var clip = try load(gpa, init.io, "/tmp/test.mp4");
+    // defer {
+    //     for (clip.frames.items) |frame| gpa.free(frame);
+    //     clip.frames.deinit(gpa);
+    // }
+    // std.debug.print("{} frames, {}x{}\n", .{ clip.frames.items.len, clip.info.width, clip.info.height });
+    //
     var window: Window = undefined;
     try window.open(gpa, init.minimal, .{
         .title = "Gifer",
@@ -39,6 +39,10 @@ pub fn main(init: std.process.Init) !void {
 
     var renderer: Renderer = try .init(gpa, &window);
     defer renderer.deinit();
+
+    // const data = @embedFile()
+
+    // Renderer.Shader(.{.vertex_bit = true,}).initFromSlice(, source: []const u8, options: InitOptions)
 
     while (!window.should_close) {
         try window.poll(.{});

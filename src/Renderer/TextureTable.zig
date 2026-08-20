@@ -12,6 +12,7 @@ next_handle: Handle = .blank,
 
 pub const Handle = enum(u32) {
     blank = 0,
+    _,
 };
 
 pub const Info = struct {

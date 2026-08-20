@@ -138,7 +138,7 @@ pub fn uploadData(self: *Image, gpa: std.mem.Allocator, device: Device, physical
     const cmd = try command_handler.beginImmediate(device);
 
     const to_transfer: vk.ImageMemoryBarrier = .{
-        .old_layout = undefined,
+        .old_layout = .undefined,
         .new_layout = .transfer_dst_optimal,
         .src_access_mask = .{},
         .dst_access_mask = .{ .transfer_write_bit = true },

@@ -46,8 +46,8 @@ pub fn main(init: std.process.Init) !void {
         try renderer.resize(window.size);
 
         try renderer.begin(window.size, .{ .clear_color = .{ 1.0, 0.0, 0.0, 1.0 } });
-        // renderer.draw();
-         try renderer.submit();
+        try renderer.draw();
+        try renderer.submit();
     }
 }
 

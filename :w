@@ -349,17 +349,11 @@ pub fn begin(renderer: *Renderer, size: Window.Size, options: BeginOptions) !voi
             .base_array_layer = 0,
             .base_mip_level = 0,
             .layer_count = 1,
-            .level_count = 1,
+            .level_count = 0,
         },
     };
     device.proxy.cmdPipelineBarrier(
         frame_data.command_buffer,
-        .{},
-        .{},
-        .{},
-        null,
-        null,
-        &.{to_depth},
     );
 
     device.proxy.cmdBeginRendering(

@@ -9,6 +9,7 @@ const Instance = @import("Instance.zig");
 const Surface = @import("Surface.zig");
 const PhysicalDevice = @import("PhysicalDevice.zig");
 const Device = @import("Device.zig");
+const Image = @import("Image.zig");
 
 handle: vk.SwapchainKHR = .null_handle,
 
@@ -16,7 +17,7 @@ images: []vk.Image = &.{},
 image_views: []vk.ImageView = &.{},
 finished: []vk.Semaphore = &.{},
 
-depth: Depth,
+depth: Image,
 
 image_count: u32 = 0,
 image_index: u32 = 0,
@@ -35,7 +36,7 @@ pub const Zombie = struct {
     images: []vk.Image = &.{},
     finished: []vk.Semaphore = &.{},
 
-    depth: ?Depth = null,
+    depth: ?Image = null,
 
     image_count: u32 = 0,
     frame_retired: u64 = 0,
@@ -56,112 +57,112 @@ pub const Zombie = struct {
     }
 };
 
-pub const Depth = struct {
-    image: vk.Image,
-    image_view: vk.ImageView,
-    memory: vk.DeviceMemory,
-    format: vk.Format,
-
-    pub fn init(instance: Instance, physical_device: PhysicalDevice, device: Device, size: Size) !Depth {
-        const format = getFormat(instance, physical_device);
-
-        const image_create_info: *const vk.ImageCreateInfo = &.{
-            .image_type = .@"2d",
-            .format = format,
-            .extent = .{
-                .width = size.width,
-                .height = size.height,
-                .depth = 1,
-            },
-            .mip_levels = 1,
-            .array_layers = 1,
-            .samples = .{ .@"1_bit" = true },
-            .tiling = .optimal,
-            .usage = .{
-                .depth_stencil_attachment_bit = true,
-                // .transfer_src_bit = true,
-                // .transfer_dst_bit = true,
-            },
-            .sharing_mode = .exclusive,
-            .initial_layout = .undefined,
-        };
-
-        const image = try device.proxy.createImage(image_create_info, null);
-        errdefer device.proxy.destroyImage(image, null);
-
-        const requirements = device.proxy.getImageMemoryRequirements(image);
-
-        const allocate_info: vk.MemoryAllocateInfo = .{
-            .allocation_size = requirements.size,
-            .memory_type_index = PhysicalDevice.findMemoryType(
-                requirements.memory_type_bits,
-                .{ .device_local_bit = true },
-                physical_device.memory_properties,
-            ),
-        };
-
-        const memory = try device.proxy.allocateMemory(&allocate_info, null);
-        errdefer device.proxy.freeMemory(memory, null);
-
-        try device.proxy.bindImageMemory(image, memory, 0);
-
-        // TODO: add transition thingie (needs immediate command buffer)
-
-        const image_view_create_info: *const vk.ImageViewCreateInfo = &.{
-            .image = image,
-            .view_type = .@"2d",
-            .format = format,
-            .subresource_range = .{
-                .aspect_mask = .{
-                    .depth_bit = true,
-                    .stencil_bit = format == .d24_unorm_s8_uint,
-                },
-                .base_mip_level = 0,
-                .level_count = 1,
-                .base_array_layer = 0,
-                .layer_count = 1,
-            },
-            .components = .{
-                .r = .identity,
-                .g = .identity,
-                .b = .identity,
-                .a = .identity,
-            },
-        };
-
-        const image_view = try device.proxy.createImageView(image_view_create_info, null);
-
-        return .{
-            .image = image,
-            .image_view = image_view,
-            .memory = memory,
-            .format = format,
-        };
-    }
-
-    pub fn deinit(self: *Depth, device: Device) void {
-        device.proxy.destroyImage(self.image, null);
-        device.proxy.destroyImageView(self.image_view, null);
-        device.proxy.freeMemory(self.memory, null);
-        self.* = undefined;
-    }
-
-    fn getFormat(instance: Instance, physical_device: PhysicalDevice) vk.Format {
-        const candidates = [_]vk.Format{
-            .d32_sfloat,
-            .d24_unorm_s8_uint,
-            .d16_unorm,
-        };
-
-        for (candidates) |format| {
-            const props = instance.proxy.getPhysicalDeviceFormatProperties(physical_device.handle, format);
-
-            if (props.optimal_tiling_features.depth_stencil_attachment_bit) return format;
-        }
-
-        unreachable;
-    }
-};
+// pub const Depth = struct {
+//     image: vk.Image,
+//     image_view: vk.ImageView,
+//     memory: vk.DeviceMemory,
+//     format: vk.Format,
+//
+//     pub fn init(instance: Instance, physical_device: PhysicalDevice, device: Device, size: Size) !Depth {
+//         const format = getFormat(instance, physical_device);
+//
+//         const image_create_info: *const vk.ImageCreateInfo = &.{
+//             .image_type = .@"2d",
+//             .format = format,
+//             .extent = .{
+//                 .width = size.width,
+//                 .height = size.height,
+//                 .depth = 1,
+//             },
+//             .mip_levels = 1,
+//             .array_layers = 1,
+//             .samples = .{ .@"1_bit" = true },
+//             .tiling = .optimal,
+//             .usage = .{
+//                 .depth_stencil_attachment_bit = true,
+//                 // .transfer_src_bit = true,
+//                 // .transfer_dst_bit = true,
+//             },
+//             .sharing_mode = .exclusive,
+//             .initial_layout = .undefined,
+//         };
+//
+//         const image = try device.proxy.createImage(image_create_info, null);
+//         errdefer device.proxy.destroyImage(image, null);
+//
+//         const requirements = device.proxy.getImageMemoryRequirements(image);
+//
+//         const allocate_info: vk.MemoryAllocateInfo = .{
+//             .allocation_size = requirements.size,
+//             .memory_type_index = PhysicalDevice.findMemoryType(
+//                 requirements.memory_type_bits,
+//                 .{ .device_local_bit = true },
+//                 physical_device.memory_properties,
+//             ),
+//         };
+//
+//         const memory = try device.proxy.allocateMemory(&allocate_info, null);
+//         errdefer device.proxy.freeMemory(memory, null);
+//
+//         try device.proxy.bindImageMemory(image, memory, 0);
+//
+//         // TODO: add transition thingie (needs immediate command buffer)
+//
+//         const image_view_create_info: *const vk.ImageViewCreateInfo = &.{
+//             .image = image,
+//             .view_type = .@"2d",
+//             .format = format,
+//             .subresource_range = .{
+//                 .aspect_mask = .{
+//                     .depth_bit = true,
+//                     .stencil_bit = format == .d24_unorm_s8_uint,
+//                 },
+//                 .base_mip_level = 0,
+//                 .level_count = 1,
+//                 .base_array_layer = 0,
+//                 .layer_count = 1,
+//             },
+//             .components = .{
+//                 .r = .identity,
+//                 .g = .identity,
+//                 .b = .identity,
+//                 .a = .identity,
+//             },
+//         };
+//
+//         const image_view = try device.proxy.createImageView(image_view_create_info, null);
+//
+//         return .{
+//             .image = image,
+//             .image_view = image_view,
+//             .memory = memory,
+//             .format = format,
+//         };
+//     }
+//
+//     pub fn deinit(self: *Depth, device: Device) void {
+//         device.proxy.destroyImage(self.image, null);
+//         device.proxy.destroyImageView(self.image_view, null);
+//         device.proxy.freeMemory(self.memory, null);
+//         self.* = undefined;
+//     }
+//
+//     fn getFormat(instance: Instance, physical_device: PhysicalDevice) vk.Format {
+//         const candidates = [_]vk.Format{
+//             .d32_sfloat,
+//             .d24_unorm_s8_uint,
+//             .d16_unorm,
+//         };
+//
+//         for (candidates) |format| {
+//             const props = instance.proxy.getPhysicalDeviceFormatProperties(physical_device.handle, format);
+//
+//             if (props.optimal_tiling_features.depth_stencil_attachment_bit) return format;
+//         }
+//
+//         unreachable;
+//     }
+// };
 
 fn build(
     swapchain: *Swapchain,
@@ -310,11 +311,17 @@ fn build(
 
         created_semaphores += 1;
     }
-
-    const depth: Depth = try .init(instance, physical_device, device, .{
-        .width = extent.width,
-        .height = extent.height,
-    });
+    const depth = try Image.init(
+        device,
+        physical_device,
+        .d32_sfloat,
+        .{
+            .height = extent.height,
+            .width = extent.width,
+        },
+        .{ .depth_stencil_attachment_bit = true },
+        .{ .depth_bit = true },
+    );
 
     swapchain.handle = handle;
     swapchain.images = images;

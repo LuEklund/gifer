@@ -16,13 +16,14 @@ pub const max_ui_indices = max_ui_quads * 6;
 pub const max_ui_vertices = max_ui_quads * 4;
 
 pub const UiVertex = extern struct {
-    position: [3]f32,
-    _: f32 = 0,
+    position: [2]f32,
+    _: [2]f32 = .{ 0, 0 },
     color: [4]f32,
 };
 
 pub const PushConstant = extern struct {
     vertex_buffer: vk.DeviceAddress,
+    window_size: [2]f32,
 };
 
 pub fn init(self: *FrameData, physical_device: PhysicalDevice, device: Device) !void {

@@ -1,13 +1,14 @@
 
 
 struct Vertex {
-  float3 position;
-  float _;
+  float2 position;
+  float2 _;
   float4 color;
 };
 
 struct PushConstant {
   Vertex *vertices;
+  float2 screen_size;
 };
 
 [[vk::push_constant]]
@@ -22,7 +23,7 @@ struct VertexOutput {
 VertexOutput vertex(uint vertex_index: SV_VertexID) {
   Vertex vertex = pc.vertices[vertex_index];
   VertexOutput output;
-  output.position = float4(vertex.position, 1.0);
+  output.position = float4(vertex.position / pc.screen_size * 2 - 1, 0, 1.0);
   output.color = vertex.color;
   return output;
 }

@@ -131,13 +131,23 @@ pub fn deinit(self: *Ui, gpa: std.mem.Allocator) void {
     self.animations.deinit(gpa);
 }
 
-pub fn start(self: *Ui, mouse_state: MouseState, delta_time: f32) void {
+pub const UiInfo = struct {
+    delta_time: f32,
+    screen_size: Size2D,
+};
+pub fn start(
+    self: *Ui,
+    mouse_state: MouseState,
+    info: UiInfo,
+) void {
     const left_click_prev = self.mouse_state.left_click;
     self.last_active_item = self.active_item;
     self.last_hover_item = self.hover_item;
     self.play_sound = .none;
     self.mouse_state = mouse_state;
-    self.delta_time = delta_time;
+    self.delta_time = info.delta_time;
+    self.screen_height = info.screen_size.height;
+    self.screen_width = info.screen_size.width;
     self.frame_index += 1;
     self.hoverUpdate();
     if (mouse_state.left_click and !left_click_prev) self.active_item = self.hover_item;

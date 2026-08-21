@@ -34,13 +34,46 @@ fn drawUi(window: *Window, ui: *Ui) void {
         .position = .{ .left = @floatCast(mouse_pos.x), .top = @floatCast(mouse_pos.y) },
         .left_click = window_ptr.buttons.left,
         .right_click = window_ptr.buttons.right,
-    }, 0);
+    }, .{
+        .delta_time = 0,
+        .screen_size = .{
+            .height = @floatFromInt(window.size.height),
+            .width = @floatFromInt(window.size.width),
+        },
+    });
+
+    ui.add(null, .{
+        .name = "display",
+        .size = .{
+            .percent = .{ .height = 1, .width = 1 },
+        },
+        .child_anchor = .{ .x = .center, .y = .center },
+    });
+
+    ui.add("display", .{
+        .size = .{ .percent = .{ .width = 1, .height = 0.5 } },
+        .color = .new(0.5, 0.5, 0.5, 1),
+    });
+
+    ui.add(null, .{
+        .name = "timeline",
+        .size = .{
+            .percent = .{ .height = 1, .width = 1 },
+        },
+        .child_anchor = .{ .x = .start, .y = .end },
+    });
+    ui.add("timeline", .{
+        .size = .{
+            .percent = .{ .width = 1, .height = 0.15 },
+        },
+        .color = .new(0.4, 0.4, 0.4, 1),
+    });
 
     ui.add(null, .{
         .name = "test",
         .size = .{ .fixed = .{
-            .width = 10,
-            .height = 10,
+            .width = 200,
+            .height = 100,
         } },
         .color = if (ui.isHovered("test")) .new(1, 0, 0, 1) else .new(0, 1, 0, 1),
     });
@@ -55,18 +88,18 @@ fn make(quads: std.ArrayList(Ui.Quad), vertices: *std.ArrayList(Renderer.UiVerte
         vertices.appendSliceAssumeCapacity(&.{
             .{
                 .color = color,
-                .position = .{ rect.left, rect.top, 0 },
+                .position = .{ rect.left, rect.top },
             },
             .{
-                .position = .{ rect.left + rect.width, rect.top, 0 },
+                .position = .{ rect.left + rect.width, rect.top },
                 .color = color,
             },
             .{
-                .position = .{ rect.left + rect.width, rect.top + rect.height, 0 },
+                .position = .{ rect.left + rect.width, rect.top + rect.height },
                 .color = color,
             },
             .{
-                .position = .{ rect.left, rect.top + rect.height, 0 },
+                .position = .{ rect.left, rect.top + rect.height },
                 .color = color,
             },
         });

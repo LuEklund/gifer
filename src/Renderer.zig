@@ -427,7 +427,11 @@ pub fn begin(self: *Renderer, size: Window.Size, options: BeginOptions) !void {
     device.proxy.cmdBindShadersEXT(frame_data.command_buffer, &.{.{ .fragment_bit = true }}, &.{self.shader_obj_frag.handle});
 }
 
-pub fn draw(self: *Renderer, ui_vertices: []const FrameData.UiVertex) !void {
+pub const DrawInfo = struct {
+    screen_size: struct { width: f32, height: f32 },
+    ui_vertices: []const FrameData.UiVertex,
+};
+pub fn draw(self: *Renderer, info: DrawInfo) !void {
     const device = self.device;
     const frame_data = self.frames[self.frame_index % frames_in_flight];
 
@@ -443,9 +447,10 @@ pub fn draw(self: *Renderer, ui_vertices: []const FrameData.UiVertex) !void {
         null,
     );
 
-    try frame_data.ui_verecies.upload(ui_vertices, device);
+    try frame_data.ui_verecies.upload(info.ui_vertices, device);
     const pc: FrameData.PushConstant = .{
         .vertex_buffer = frame_data.ui_verecies.getAddress(device),
+        .window_size = .{ info.screen_size.width, info.screen_size.height },
     };
     device.proxy.cmdBindIndexBuffer(frame_data.command_buffer, self.ui_index.handle, 0, .uint32);
     device.proxy.cmdPushConstants(
@@ -459,7 +464,7 @@ pub fn draw(self: *Renderer, ui_vertices: []const FrameData.UiVertex) !void {
 
     device.proxy.cmdDrawIndexed(
         frame_data.command_buffer,
-        @intCast(ui_vertices.len / 4 * 6),
+        @intCast(info.ui_vertices.len / 4 * 6),
         1,
         0,
         0,
@@ -686,4 +691,8 @@ pub fn updateShaders(self: *Renderer, io: std.Io) !void {
     self.shader_obj_vert = new_vert;
     self.shader_obj_frag = new_frag;
     std.log.info("reloaded shaders", .{});
+}
+
+pub fn createTexture(self: *Renderer, info: TextureTable.Info) !TextureTable.Handle {
+    return try self.texture_table.createTexture(self.device, self.physical_device, info);
 }

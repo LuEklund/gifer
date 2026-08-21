@@ -124,7 +124,7 @@ pub fn uploadData(self: *Image, device: Device, physical_device: PhysicalDevice,
         .{ .transfer_src_bit = true },
         .{ .host_visible_bit = true, .host_coherent_bit = true },
     );
-    try staging.upload(data, device);
+    try staging.upload(data);
     defer staging.deinit(device);
     errdefer staging.deinit(device);
 

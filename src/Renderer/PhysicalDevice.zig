@@ -10,6 +10,7 @@ handle: vk.PhysicalDevice,
 properties: vk.PhysicalDeviceProperties,
 memory_properties: vk.PhysicalDeviceMemoryProperties,
 graphics_queue_family_index: u32,
+sampler_descriptor_size: vk.DeviceSize,
 
 pub const PickError =
     vk.InstanceWrapper.EnumeratePhysicalDevicesAllocError ||
@@ -26,8 +27,19 @@ pub fn pick(gpa: std.mem.Allocator, instance: Instance, surface: Surface) PickEr
     var best: ?PhysicalDevice = null;
     var best_score: i32 = -1;
 
+    var physical_device_descriptor_buffer_properties: vk.PhysicalDeviceDescriptorBufferPropertiesEXT = undefined;
+    physical_device_descriptor_buffer_properties.s_type = .physical_device_descriptor_buffer_properties_ext;
+    physical_device_descriptor_buffer_properties.p_next = null;
+    var physical_device_properties: vk.PhysicalDeviceProperties2 = .{
+        .p_next = &physical_device_descriptor_buffer_properties,
+        .properties = undefined,
+    };
     for (physical_devices) |physical_device| {
-        const properties = instance.proxy.getPhysicalDeviceProperties(physical_device);
+        instance.proxy.getPhysicalDeviceProperties2(
+            physical_device,
+            &physical_device_properties,
+        );
+        const properties = physical_device_properties.properties;
         const memory_properties = instance.proxy.getPhysicalDeviceMemoryProperties(physical_device);
 
         const families = try instance.proxy.getPhysicalDeviceQueueFamilyPropertiesAlloc(physical_device, gpa);
@@ -59,6 +71,7 @@ pub fn pick(gpa: std.mem.Allocator, instance: Instance, surface: Surface) PickEr
                 .properties = properties,
                 .memory_properties = memory_properties,
                 .graphics_queue_family_index = queue_family,
+                .sampler_descriptor_size = physical_device_descriptor_buffer_properties.combined_image_sampler_descriptor_size,
             };
         }
     }

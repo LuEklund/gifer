@@ -89,18 +89,26 @@ fn make(quads: std.ArrayList(Ui.Quad), vertices: *std.ArrayList(Renderer.UiVerte
             .{
                 .color = color,
                 .position = .{ rect.left, rect.top },
+                .uv = .{ 0, 0 },
+                .texture_id = 1,
             },
             .{
                 .position = .{ rect.left + rect.width, rect.top },
                 .color = color,
+                .uv = .{ 1, 0 },
+                .texture_id = 1,
             },
             .{
                 .position = .{ rect.left + rect.width, rect.top + rect.height },
                 .color = color,
+                .uv = .{ 1, 1 },
+                .texture_id = 1,
             },
             .{
                 .position = .{ rect.left, rect.top + rect.height },
                 .color = color,
+                .uv = .{ 0, 1 },
+                .texture_id = 1,
             },
         });
         // if (node.layout.text) |text| {

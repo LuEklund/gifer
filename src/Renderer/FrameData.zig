@@ -17,8 +17,9 @@ pub const max_ui_vertices = max_ui_quads * 4;
 
 pub const UiVertex = extern struct {
     position: [2]f32,
-    _: [2]f32 = .{ 0, 0 },
+    uv: [2]f32,
     color: [4]f32,
+    texture_id: u32 = 0,
 };
 
 pub const PushConstant = extern struct {

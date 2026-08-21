@@ -8,6 +8,7 @@ pub fn Buffer(comptime T: type) type {
         const Self = @This();
         handle: vk.Buffer,
         memory: vk.DeviceMemory,
+        mapped: *anyopaque,
         size: usize,
 
         pub fn init(
@@ -45,25 +46,25 @@ pub fn Buffer(comptime T: type) type {
 
             try device.proxy.bindBufferMemory(handle, memory, 0);
 
+            const mapped = try device.proxy.mapMemory(memory, 0, create_info.size, .{}) orelse return error.Mapped;
+
             return .{
                 .handle = handle,
                 .memory = memory,
                 .size = create_info.size,
+                .mapped = mapped,
             };
         }
 
         pub fn deinit(self: Self, device: Device) void {
+            device.proxy.unmapMemory(self.memory);
             device.proxy.destroyBuffer(self.handle, null);
             device.proxy.freeMemory(self.memory, null);
         }
 
-        pub fn upload(self: Self, data: []const T, device: Device) !void {
-            const mapped = try device.proxy.mapMemory(self.memory, 0, self.size, .{});
-
-            const dst: [*]T = @ptrCast(@alignCast(mapped));
+        pub fn upload(self: Self, data: []const T) !void {
+            const dst: [*]T = @ptrCast(@alignCast(self.mapped));
             @memcpy(dst[0..data.len], data);
-
-            device.proxy.unmapMemory(self.memory);
         }
 
         pub fn getAddress(self: Self, device: Device) vk.DeviceAddress {

@@ -99,6 +99,7 @@ pub fn init(self: *Renderer, allocator: std.mem.Allocator, io: std.Io, window: *
     const device_extensions: []const [*:0]const u8 = &.{
         vk.extensions.khr_swapchain.name,
         vk.extensions.ext_shader_object.name,
+        vk.extensions.ext_descriptor_buffer.name,
     };
 
     const gpa = allocator;
@@ -135,27 +136,57 @@ pub fn init(self: *Renderer, allocator: std.mem.Allocator, io: std.Io, window: *
         try frame_data.init(physical_device, device);
     }
 
-    var texture_table: TextureTable = .{};
-    _ = try texture_table.createTexture(device, physical_device, .{
-        .width = 1,
-        .height = 1,
-        .data = &.{ 255, 255, 255, 255 },
-    });
-
     const data = try readSpv(gpa, io);
     defer gpa.free(data);
     const shader_mtime = (try std.Io.Dir.cwd().statFile(io, shader_path, .{})).mtime;
     const pc = push_constant_range;
 
-    const desc_layout = try DescriptorLayout.init(device, &.{}, .{});
+    // const bind: vk.DescriptorSetLayoutBinding = .{
+    //     .stage_flags = .{
+    //         .fragment_bit = true,
+    //     },
+    //     .binding = 0,
+    //     .descriptor_type = .sampled_image,
+    //     .descriptor_count = 1,
+    //     .p_immutable_samplers = null,
+    // };
+    const desc_layout = try DescriptorLayout.init(device, &.{
+        .{
+            .stage_flags = .{
+                .fragment_bit = true,
+            },
+            .binding = 0,
+            .descriptor_type = .combined_image_sampler,
+            .descriptor_count = 256,
+            .p_immutable_samplers = null,
+        },
+    }, .{ .descriptor_buffer_bit_ext = true });
     const pipeline_layout = try PipelineLayout.init(
         device,
         &.{pc},
         &.{desc_layout.handle},
     );
 
-    const shader_obj_vert = try createShader(device, data, "vertex", .{ .vertex_bit = true }, .{ .fragment_bit = true });
-    const shader_obj_frag = try createShader(device, data, "fragment", .{ .fragment_bit = true }, .{});
+    var texture_table: TextureTable = undefined;
+    try texture_table.init(device, physical_device, desc_layout);
+
+    const new_vert = try ShaderObject.init(device, .{
+        .entry_name = "vertex",
+        .source = data,
+        .stage = .{ .vertex_bit = true },
+        .next_stage = .{ .fragment_bit = true },
+        .push_constant_ranges = &.{push_constant_range},
+        .descriptor_layputs = &.{desc_layout.handle},
+    });
+
+    const new_frag = try ShaderObject.init(device, .{
+        .entry_name = "fragment",
+        .source = data,
+        .stage = .{ .fragment_bit = true },
+        .next_stage = .{},
+        .push_constant_ranges = &.{push_constant_range},
+        .descriptor_layputs = &.{desc_layout.handle},
+    });
 
     const ui_index: Buffer(u32) = try Buffer(u32).init(
         FrameData.max_ui_indices,
@@ -170,7 +201,7 @@ pub fn init(self: *Renderer, allocator: std.mem.Allocator, io: std.Io, window: *
         const base: u32 = @as(u32, @intCast(quad_index)) * 4;
         index_data[quad_index * 6 ..][0..6].* = .{ base, base + 1, base + 2, base + 2, base + 3, base };
     }
-    try ui_index.upload(&index_data, device);
+    try ui_index.upload(&index_data);
 
     self.* = .{
         .gpa = gpa,
@@ -178,8 +209,8 @@ pub fn init(self: *Renderer, allocator: std.mem.Allocator, io: std.Io, window: *
         .texture_table = texture_table,
         .desc_layout = desc_layout,
         .pipeline_layout = pipeline_layout,
-        .shader_obj_vert = shader_obj_vert,
-        .shader_obj_frag = shader_obj_frag,
+        .shader_obj_vert = new_vert,
+        .shader_obj_frag = new_frag,
         .shader_mtime = shader_mtime,
         .ui_index = ui_index,
 
@@ -447,7 +478,13 @@ pub fn draw(self: *Renderer, info: DrawInfo) !void {
         null,
     );
 
-    try frame_data.ui_verecies.upload(info.ui_vertices, device);
+    device.proxy.cmdBindDescriptorBuffersEXT(frame_data.command_buffer, &.{.{
+        .address = self.texture_table.descriptor_buffer.getAddress(device),
+        .usage = .{ .resource_descriptor_buffer_bit_ext = true, .sampler_descriptor_buffer_bit_ext = true },
+    }});
+    device.proxy.cmdSetDescriptorBufferOffsetsEXT(frame_data.command_buffer, .graphics, self.pipeline_layout.handle, 0, &.{0}, &.{0});
+
+    try frame_data.ui_verecies.upload(info.ui_vertices);
     const pc: FrameData.PushConstant = .{
         .vertex_buffer = frame_data.ui_verecies.getAddress(device),
         .window_size = .{ info.screen_size.width, info.screen_size.height },
@@ -663,15 +700,15 @@ fn readSpv(gpa: std.mem.Allocator, io: std.Io) ![]align(4) u8 {
     return bytes;
 }
 
-fn createShader(device: Device, spirv: []const u8, entry_name: [*:0]const u8, stage: vk.ShaderStageFlags, next_stage: vk.ShaderStageFlags) !ShaderObject {
-    return ShaderObject.init(device, .{
-        .entry_name = entry_name,
-        .source = spirv,
-        .stage = stage,
-        .next_stage = next_stage,
-        .push_constant_ranges = &.{push_constant_range},
-    });
-}
+// fn createShader(
+//     device: Device,
+//     spirv: []const u8,
+//     entry_name: [*:0]const u8,
+//     stage: vk.ShaderStageFlags,
+//     next_stage: vk.ShaderStageFlags,
+// ) !ShaderObject {
+//     return
+// }
 
 pub fn updateShaders(self: *Renderer, io: std.Io) !void {
     const stat = std.Io.Dir.cwd().statFile(io, shader_path, .{}) catch return;
@@ -681,9 +718,24 @@ pub fn updateShaders(self: *Renderer, io: std.Io) !void {
     const spirv = try readSpv(self.gpa, io);
     defer self.gpa.free(spirv);
 
-    const new_vert = try createShader(self.device, spirv, "vertex", .{ .vertex_bit = true }, .{ .fragment_bit = true });
+    const new_vert = try ShaderObject.init(self.device, .{
+        .entry_name = "vertex",
+        .source = spirv,
+        .stage = .{ .vertex_bit = true },
+        .next_stage = .{ .fragment_bit = true },
+        .push_constant_ranges = &.{push_constant_range},
+        .descriptor_layputs = &.{self.desc_layout.handle},
+    });
+
     errdefer new_vert.deinit(self.device);
-    const new_frag = try createShader(self.device, spirv, "fragment", .{ .fragment_bit = true }, .{});
+    const new_frag = try ShaderObject.init(self.device, .{
+        .entry_name = "fragment",
+        .source = spirv,
+        .stage = .{ .fragment_bit = true },
+        .next_stage = .{},
+        .push_constant_ranges = &.{push_constant_range},
+        .descriptor_layputs = &.{self.desc_layout.handle},
+    });
 
     try self.device.proxy.deviceWaitIdle();
     self.shader_obj_vert.deinit(self.device);

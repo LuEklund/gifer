@@ -23,6 +23,13 @@ const Image = @import("Renderer/Image.zig");
 const TextureTable = @import("Renderer/TextureTable.zig");
 
 pub const UiVertex = FrameData.UiVertex;
+pub const max_ui_quads = FrameData.max_ui_quads;
+const push_constant_range: vk.PushConstantRange = .{
+    .size = @sizeOf(FrameData.PushConstant),
+    .offset = 0,
+    .stage_flags = .{ .vertex_bit = true, .fragment_bit = true },
+};
+const shader_path = "zig-out/shaders/vert.spv";
 
 gpa: std.mem.Allocator,
 
@@ -41,6 +48,7 @@ pipeline_layout: PipelineLayout,
 desc_layout: DescriptorLayout,
 shader_obj_vert: ShaderObject,
 shader_obj_frag: ShaderObject,
+shader_mtime: std.Io.Timestamp,
 ui_index: Buffer(u32),
 
 frames: [frames_in_flight]FrameData,
@@ -65,7 +73,7 @@ const layers: []const [*:0]const u8 = if (builtin.mode == .Debug)
 else
     &.{};
 
-pub fn init(allocator: std.mem.Allocator, window: *Window) !Renderer {
+pub fn init(self: *Renderer, allocator: std.mem.Allocator, io: std.Io, window: *Window) !void {
     const platform_extensions: []const [*:0]const u8 = switch (builtin.os.tag) {
         .linux, .freebsd, .openbsd, .netbsd, .dragonfly, .illumos => switch (window.inner) {
             .wayland => &.{
@@ -134,8 +142,10 @@ pub fn init(allocator: std.mem.Allocator, window: *Window) !Renderer {
         .data = &.{ 255, 255, 255, 255 },
     });
 
-    const data = @embedFile("assets/shaders/verte.spv");
-    const pc: vk.PushConstantRange = .{ .size = @sizeOf(FrameData.PushConstant), .offset = 0, .stage_flags = .{ .vertex_bit = true, .fragment_bit = true } };
+    const data = try readSpv(gpa, io);
+    defer gpa.free(data);
+    const shader_mtime = (try std.Io.Dir.cwd().statFile(io, shader_path, .{})).mtime;
+    const pc = push_constant_range;
 
     const desc_layout = try DescriptorLayout.init(device, &.{}, .{});
     const pipeline_layout = try PipelineLayout.init(
@@ -144,20 +154,8 @@ pub fn init(allocator: std.mem.Allocator, window: *Window) !Renderer {
         &.{desc_layout.handle},
     );
 
-    const shader_obj_vert = try ShaderObject.init(device, .{
-        .entry_name = "vertex",
-        .source = data,
-        .stage = .{ .vertex_bit = true },
-        .next_stage = .{ .fragment_bit = true },
-        .push_constant_ranges = &.{pc},
-    });
-    const shader_obj_frag = try ShaderObject.init(device, .{
-        .entry_name = "fragment",
-        .source = data,
-        .stage = .{ .fragment_bit = true },
-        .next_stage = .{},
-        .push_constant_ranges = &.{pc},
-    });
+    const shader_obj_vert = try createShader(device, data, "vertex", .{ .vertex_bit = true }, .{ .fragment_bit = true });
+    const shader_obj_frag = try createShader(device, data, "fragment", .{ .fragment_bit = true }, .{});
 
     const ui_index: Buffer(u32) = try Buffer(u32).init(
         FrameData.max_ui_indices,
@@ -174,7 +172,7 @@ pub fn init(allocator: std.mem.Allocator, window: *Window) !Renderer {
     }
     try ui_index.upload(&index_data, device);
 
-    return .{
+    self.* = .{
         .gpa = gpa,
 
         .texture_table = texture_table,
@@ -182,6 +180,7 @@ pub fn init(allocator: std.mem.Allocator, window: *Window) !Renderer {
         .pipeline_layout = pipeline_layout,
         .shader_obj_vert = shader_obj_vert,
         .shader_obj_frag = shader_obj_frag,
+        .shader_mtime = shader_mtime,
         .ui_index = ui_index,
 
         .dynlib = dynlib,
@@ -644,113 +643,47 @@ pub fn setCullMode(self: FrameData, device: Device, mode: vk.CullModeFlags) void
     device.proxy.cmdSetCullMode(self.command_buffer, mode);
 }
 
-pub fn Shader(stage: vk.ShaderStageFlags) type {
-    const default_next_stage: vk.ShaderStageFlags = if (stage.vertex_bit)
-        .{ .fragment_bit = true }
-    else if (stage.tessellation_control_bit)
-        .{ .tessellation_evaluation_bit = true }
-    else if (stage.tessellation_evaluation_bit)
-        .{ .geometry_bit = true }
-    else if (stage.geometry_bit)
-        .{ .fragment_bit = true }
-    else
-        .{};
+fn readSpv(gpa: std.mem.Allocator, io: std.Io) ![]align(4) u8 {
+    const file = try std.Io.Dir.cwd().openFile(io, shader_path, .{});
+    defer file.close(io);
 
-    return struct {
-        const Self = @This();
+    var buffer: [4096]u8 = undefined;
+    var reader = file.reader(io, &buffer);
+    const len: usize = @intCast((try file.stat(io)).size);
+    const bytes = try gpa.alignedAlloc(u8, .@"4", len);
+    errdefer gpa.free(bytes);
+    try reader.interface.readSliceAll(bytes);
 
-        object: ShaderObject,
-
-        pub const InitOptions = struct {
-            next_stage: vk.ShaderStageFlags = default_next_stage,
-            entry_name: [*:0]const u8 = "main",
-        };
-
-        pub const InitError = ShaderObject.InitError;
-
-        pub fn initFromSlice(device: Device, source: []const u8, options: InitOptions) InitError!Self {
-            const shader_object: ShaderObject = try .init(device, .{
-                .stage = stage,
-                .next_stage = options.next_stage,
-                .source = source,
-                .entry_name = options.entry_name,
-            });
-
-            return .{ .object = shader_object };
-        }
-
-        pub fn initFromSliceWithPushConstants(device: Device, source: []const u8, options: InitOptions, push_constant_range: PushConstantRange) InitError!Self {
-            const shader_object: ShaderObject = try .init(device, .{
-                .stage = stage,
-                .next_stage = options.next_stage,
-                .source = source,
-                .entry_name = options.entry_name,
-                .push_constant_ranges = &.{push_constant_range},
-            });
-
-            return .{ .object = shader_object };
-        }
-
-        pub fn deinit(self: Self, device: Device) void {
-            self.object.deinit(device);
-        }
-
-        pub fn bind(self: Self, device: Device, frame_data: FrameData) void {
-            device.proxy.cmdBindShadersEXT(
-                frame_data.command_buffer,
-                &.{stage},
-                &.{self.object.handle},
-            );
-        }
-    };
+    if (bytes.len < 4 or std.mem.readInt(u32, bytes[0..4], .little) != 0x7230203) return error.BadSpirv;
+    return bytes;
 }
 
-pub const PushConstantRange = vk.PushConstantRange;
-pub fn PushConstant(comptime Value: type, shader_stages: vk.ShaderStageFlags) type {
-    switch (@typeInfo(Value)) {
-        .@"struct" => |s| {
-            if (s.layout != .@"extern") @compileError("expected extern struct layout for push constants, found '" ++ @tagName(s.layout) ++ "' in '" ++ @typeName(Value) ++ "'");
-        },
-        else => |info| {
-            @compileError("expected extern struct for push constants, found '" ++ @tagName(info) ++ " in '" ++ @typeName(Value) ++ "'");
-        },
-    }
+fn createShader(device: Device, spirv: []const u8, entry_name: [*:0]const u8, stage: vk.ShaderStageFlags, next_stage: vk.ShaderStageFlags) !ShaderObject {
+    return ShaderObject.init(device, .{
+        .entry_name = entry_name,
+        .source = spirv,
+        .stage = stage,
+        .next_stage = next_stage,
+        .push_constant_ranges = &.{push_constant_range},
+    });
+}
 
-    const range: vk.PushConstantRange = .{
-        .stage_flags = shader_stages,
-        .offset = 0,
-        .size = @sizeOf(Value),
-    };
+pub fn updateShaders(self: *Renderer, io: std.Io) !void {
+    const stat = std.Io.Dir.cwd().statFile(io, shader_path, .{}) catch return;
+    if (stat.mtime.nanoseconds <= self.shader_mtime.nanoseconds) return;
+    self.shader_mtime = stat.mtime;
 
-    return struct {
-        const Self = @This();
+    const spirv = try readSpv(self.gpa, io);
+    defer self.gpa.free(spirv);
 
-        layout: vk.PipelineLayout,
+    const new_vert = try createShader(self.device, spirv, "vertex", .{ .vertex_bit = true }, .{ .fragment_bit = true });
+    errdefer new_vert.deinit(self.device);
+    const new_frag = try createShader(self.device, spirv, "fragment", .{ .fragment_bit = true }, .{});
 
-        pub fn init(device: Device) !Self {
-            const layout_create_info = vk.PipelineLayoutCreateInfo{
-                .push_constant_range_count = 1,
-                .p_push_constant_ranges = @ptrCast(&range),
-            };
-
-            const layout = try device.proxy.createPipelineLayout(&layout_create_info, null);
-
-            return .{ .layout = layout };
-        }
-
-        pub fn deinit(self: Self, device: Device) void {
-            device.proxy.destroyPipelineLayout(self.layout, null);
-        }
-
-        pub fn push(self: Self, device: Device, frame_data: FrameData, value: Value) void {
-            device.proxy.cmdPushConstants(
-                frame_data.command_buffer,
-                self.layout,
-                range.stage_flags,
-                range.offset,
-                range.size,
-                &value,
-            );
-        }
-    };
+    try self.device.proxy.deviceWaitIdle();
+    self.shader_obj_vert.deinit(self.device);
+    self.shader_obj_frag.deinit(self.device);
+    self.shader_obj_vert = new_vert;
+    self.shader_obj_frag = new_frag;
+    std.log.info("reloaded shaders", .{});
 }

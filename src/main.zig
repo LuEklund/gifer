@@ -1,8 +1,8 @@
 const std = @import("std");
 const Capture = @import("Capture.zig");
 const Window = @import("Window.zig");
-const Renderer = @import("Renderer.zig");
-const Ui = @import("Ui.zig");
+const System = @import("System.zig");
+const HotLib = @import("HotLib.zig").HotLib;
 
 pub const Info = struct { width: u32, height: u32, fps_num: u32, fps_den: u32 };
 
@@ -37,27 +37,18 @@ pub fn main(init: std.process.Init) !void {
     });
     defer window.close();
 
-    var renderer: Renderer = try .init(gpa, &window);
-    defer renderer.deinit();
+    var hot: HotLib(System.Api) = try .init("system", gpa, init.io);
+    defer hot.deinit(init.io);
 
-    // const data = @embedFile()
+    var system: System = undefined;
+    if (!hot.api.systemInit(&system, &gpa, &init.io, &window)) return error.SystemInit;
+    defer hot.api.systemDeinit(&system);
 
-    // Renderer.Shader(.{.vertex_bit = true,}).initFromSlice(, source: []const u8, options: InitOptions)
-
-    const verts: [4]Renderer.UiVertex = .{
-        .{ .position = .{ -0.5, -0.5, 0 }, .color = .{ 1, 0, 0, 1 } }, // top-left
-        .{ .position = .{ 0.5, -0.5, 0 }, .color = .{ 0, 1, 0, 1 } }, // top-right
-        .{ .position = .{ 0.5, 0.5, 0 }, .color = .{ 0, 0, 1, 1 } }, // bottom-right
-        .{ .position = .{ -0.5, 0.5, 0 }, .color = .{ 1, 1, 1, 1 } }, // bottom-left
-    };
     while (!window.should_close) {
         try window.poll(.{});
 
-        try renderer.resize(window.size);
-
-        try renderer.begin(window.size, .{ .clear_color = .{ 1.0, 0.0, 0.0, 1.0 } });
-        try renderer.draw(&verts);
-        try renderer.submit();
+        hot.trySwap(init.io);
+        hot.api.systemUpdate(&system, &window);
     }
 }
 

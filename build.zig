@@ -54,6 +54,29 @@ pub fn build(b: *std.Build) void {
         },
     });
 
+    const system_mod = b.createModule(.{
+        .root_source_file = b.path("src/System.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "vulkan", .module = vulkan },
+            .{ .name = "win32", .module = win32 },
+            .{ .name = "numz", .module = numz },
+            .{ .name = "stb_image", .module = stb_image_module },
+            .{ .name = "stb_truetype", .module = stb_truetype_module },
+        },
+        .link_libc = switch (target.result.os.tag) {
+            .linux, .freebsd, .openbsd, .netbsd, .dragonfly, .illumos => true,
+            else => false,
+        },
+    });
+
+    const slangc = b.addSystemCommand(&.{"slangc"});
+    slangc.addFileArg(b.path("src/assets/shaders/shader.slang"));
+    slangc.addArgs(&.{ "-target", "spirv", "-o" });
+    const spv = slangc.addOutputFileArg("vert.spv");
+    b.getInstallStep().dependOn(&b.addInstallFileWithDir(spv, .prefix, "shaders/vert.spv").step);
+
     switch (target.result.os.tag) {
         .linux, .freebsd, .openbsd, .netbsd, .dragonfly, .illumos => {
             const scanner = @import("wayland").Scanner.create(b, .{});
@@ -87,6 +110,7 @@ pub fn build(b: *std.Build) void {
             scanner.generate("xdg_toplevel_icon_manager_v1", 1);
 
             mod.addImport("wayland", wayland);
+            system_mod.addImport("wayland", wayland);
 
             const libxkbcommon = b.dependency("libxkbcommon", .{
                 .target = target,
@@ -98,6 +122,7 @@ pub fn build(b: *std.Build) void {
             xkbcommon.linkLibrary(libxkbcommon);
 
             mod.addImport("xkbcommon", xkbcommon);
+            system_mod.addImport("xkbcommon", xkbcommon);
         },
         .macos => {
             mod.addCSourceFile(.{
@@ -121,6 +146,13 @@ pub fn build(b: *std.Build) void {
     });
 
     b.installArtifact(exe);
+
+    const system_lib = b.addLibrary(.{
+        .name = "system",
+        .root_module = system_mod,
+        .linkage = .dynamic,
+    });
+    b.installArtifact(system_lib);
 
     const run_step = b.step("run", "Run the app");
     const run_cmd = b.addRunArtifact(exe);

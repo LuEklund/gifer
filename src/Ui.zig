@@ -3,8 +3,7 @@ const Ui = @This();
 const std = @import("std");
 const nz = @import("numz");
 
-const max_ui_quads = 1024;
-
+max_ui_quads: u32,
 writer_buffer_out: [8192]u8 = undefined,
 writer_len: usize = 0,
 text_buffer: [8192]u8 = undefined,
@@ -34,11 +33,9 @@ pub fn key(name: []const u8) u64 {
     return std.hash.Wyhash.hash(0, name);
 }
 
-const Quad = struct {
-    min: f32,
-    max: f32,
-    uv_min: f32,
-    uv_max: f32,
+pub const Quad = struct {
+    rect: Rect,
+    color: [4]f32,
 };
 
 const Node = struct {
@@ -110,6 +107,7 @@ pub fn init(
     gpa: std.mem.Allocator,
     screen_width: u32,
     screen_height: u32,
+    max_ui_quads: u32,
 ) !Ui {
     var names: std.AutoArrayHashMapUnmanaged(u64, u32) = .empty;
     try names.ensureTotalCapacity(gpa, max_ui_quads);
@@ -122,7 +120,7 @@ pub fn init(
         .animations = animations,
         .screen_width = @floatFromInt(screen_width),
         .screen_height = @floatFromInt(screen_height),
-        .default_font = null,
+        .max_ui_quads = max_ui_quads,
     };
 }
 
@@ -212,8 +210,8 @@ fn addNode(self: *Ui, parent_id: ?u32, layout: Layout) void {
     for (layout.children) |child| self.addNode(handle, child);
 }
 
-// const TextMetrics = struct { width: f32, top: f32, bottom: f32 };
-//
+const TextMetrics = struct { width: f32, top: f32, bottom: f32 };
+
 // fn measureText(glyphs: *const [96]Font.Glyph, text: []const u8, scale: f32) TextMetrics {
 //     var metrics: TextMetrics = .{ .width = 0, .top = 0, .bottom = 0 };
 //     for (text) |char| {
@@ -324,49 +322,44 @@ fn screenRect(self: *const Ui) Rect {
     return .{ .left = 0, .top = 0, .width = self.screen_width, .height = self.screen_height };
 }
 
-// fn pushQuads(self: *Ui) void {
-//     for (self.nodes.items) |node| {
-//         const rect = node.rect;
-//         if (node.layout.color.a != 0) {
-//             const colors: [4]f32 = node.layout.color.toVec();
-//             self.quads.appendAssumeCapacity(.{ .vertices = .{
-//                 .{ .position = .{ rect.left, rect.top }, .color = colors, .uv = .{ 0, 0 }, .is_sdf = 0, .texture_index = @intFromEnum(node.layout.texture) },
-//                 .{ .position = .{ rect.left + rect.width, rect.top }, .color = colors, .uv = .{ 1, 0 }, .is_sdf = 0, .texture_index = @intFromEnum(node.layout.texture) },
-//                 .{ .position = .{ rect.left + rect.width, rect.top + rect.height }, .color = colors, .uv = .{ 1, 1 }, .is_sdf = 0, .texture_index = @intFromEnum(node.layout.texture) },
-//                 .{ .position = .{ rect.left, rect.top + rect.height }, .color = colors, .uv = .{ 0, 1 }, .is_sdf = 0, .texture_index = @intFromEnum(node.layout.texture) },
-//             } });
-//         }
-//         if (node.layout.text) |text| {
-//             const color = text.color.toVec();
-//             const font = self.default_font;
-//             const anchor = node.layout.child_anchor;
-//             const scale = text.size / font.size;
-//             const metrics = measureText(&font.glyphs, text.data, scale);
-//             var pen: struct {
-//                 x: f32,
-//                 y: f32,
-//             } = .{
-//                 .x = node.rect.left + startOffset(anchor.x, node.rect.width, metrics.width, node.layout.padding),
-//                 .y = node.rect.top + startOffset(anchor.y, node.rect.height, metrics.bottom - metrics.top, node.layout.padding) - metrics.top,
-//             };
-//             for (text.data) |char| {
-//                 const index: usize = @intCast(std.math.clamp(@as(i32, char) - 32, 0, 95));
-//                 const glyph = font.glyphs[index];
-//                 const x0 = pen.x + glyph.xoff * scale;
-//                 const y0 = pen.y + glyph.yoff * scale;
-//                 const x1 = x0 + glyph.width * scale;
-//                 const y1 = y0 + glyph.height * scale;
-//                 self.quads.appendAssumeCapacity(.{ .vertices = .{
-//                     .{ .position = .{ x0, y0 }, .color = color, .uv = .{ glyph.u0, glyph.v0 }, .is_sdf = 1, .texture_index = font.atlas_texture_index },
-//                     .{ .position = .{ x1, y0 }, .color = color, .uv = .{ glyph.u1, glyph.v0 }, .is_sdf = 1, .texture_index = font.atlas_texture_index },
-//                     .{ .position = .{ x1, y1 }, .color = color, .uv = .{ glyph.u1, glyph.v1 }, .is_sdf = 1, .texture_index = font.atlas_texture_index },
-//                     .{ .position = .{ x0, y1 }, .color = color, .uv = .{ glyph.u0, glyph.v1 }, .is_sdf = 1, .texture_index = font.atlas_texture_index },
-//                 } });
-//                 pen.x += glyph.xadvance * scale;
-//             }
-//         }
-//     }
-// }
+fn pushQuads(self: *Ui) void {
+    for (self.nodes.items) |node| {
+        const rect = node.rect;
+        if (node.layout.color.a != 0) {
+            const colors: [4]f32 = node.layout.color.toVec();
+            self.quads.appendAssumeCapacity(.{ .rect = rect, .color = colors });
+        }
+        // if (node.layout.text) |text| {
+        //     const color = text.color.toVec();
+        //     const font = self.default_font;
+        //     const anchor = node.layout.child_anchor;
+        //     const scale = text.size / font.size;
+        //     const metrics = measureText(&font.glyphs, text.data, scale);
+        //     var pen: struct {
+        //         x: f32,
+        //         y: f32,
+        //     } = .{
+        //         .x = node.rect.left + startOffset(anchor.x, node.rect.width, metrics.width, node.layout.padding),
+        //         .y = node.rect.top + startOffset(anchor.y, node.rect.height, metrics.bottom - metrics.top, node.layout.padding) - metrics.top,
+        //     };
+        //     for (text.data) |char| {
+        //         const index: usize = @intCast(std.math.clamp(@as(i32, char) - 32, 0, 95));
+        //         const glyph = font.glyphs[index];
+        //         const x0 = pen.x + glyph.xoff * scale;
+        //         const y0 = pen.y + glyph.yoff * scale;
+        //         const x1 = x0 + glyph.width * scale;
+        //         const y1 = y0 + glyph.height * scale;
+        //         self.quads.appendAssumeCapacity(.{ .vertices = .{
+        //             .{ .position = .{ x0, y0 }, .color = color, .uv = .{ glyph.u0, glyph.v0 }, .is_sdf = 1, .texture_index = font.atlas_texture_index },
+        //             .{ .position = .{ x1, y0 }, .color = color, .uv = .{ glyph.u1, glyph.v0 }, .is_sdf = 1, .texture_index = font.atlas_texture_index },
+        //             .{ .position = .{ x1, y1 }, .color = color, .uv = .{ glyph.u1, glyph.v1 }, .is_sdf = 1, .texture_index = font.atlas_texture_index },
+        //             .{ .position = .{ x0, y1 }, .color = color, .uv = .{ glyph.u0, glyph.v1 }, .is_sdf = 1, .texture_index = font.atlas_texture_index },
+        //         } });
+        //         pen.x += glyph.xadvance * scale;
+        //     }
+        // }
+    }
+}
 
 pub fn addText(self: *Ui, parent: ?[]const u8, text: []const u8, size: f32, left: f32, top: f32) void {
     self.add(parent, .{

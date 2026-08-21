@@ -15,6 +15,8 @@ const PhysicalDevice = @import("Renderer/PhysicalDevice.zig");
 const Device = @import("Renderer/Device.zig");
 const Swapchain = @import("Renderer/Swapchain.zig");
 const FrameData = @import("Renderer/FrameData.zig");
+const PipelineLayout = @import("Renderer/PipelineLayout.zig");
+const DescriptorLayout = @import("Renderer/DescriptorLayout.zig");
 const ShaderObject = @import("Renderer/ShaderObject.zig");
 const Buffer = @import("Renderer/Buffer.zig").Buffer;
 const Image = @import("Renderer/Image.zig");
@@ -35,6 +37,8 @@ device: Device,
 swapchain: Swapchain,
 
 texture_table: TextureTable,
+pipeline_layout: PipelineLayout,
+desc_layout: DescriptorLayout,
 shader_obj_vert: ShaderObject,
 shader_obj_frag: ShaderObject,
 ui_index: Buffer(u32),
@@ -130,20 +134,29 @@ pub fn init(allocator: std.mem.Allocator, window: *Window) !Renderer {
         .data = &.{ 255, 255, 255, 255 },
     });
 
-    const data = @embedFile("assets/shaders/vert.spv");
+    const data = @embedFile("assets/shaders/verte.spv");
+    const pc: vk.PushConstantRange = .{ .size = @sizeOf(FrameData.PushConstant), .offset = 0, .stage_flags = .{ .vertex_bit = true, .fragment_bit = true } };
+
+    const desc_layout = try DescriptorLayout.init(device, &.{}, .{});
+    const pipeline_layout = try PipelineLayout.init(
+        device,
+        &.{pc},
+        &.{desc_layout.handle},
+    );
+
     const shader_obj_vert = try ShaderObject.init(device, .{
         .entry_name = "vertex",
         .source = data,
         .stage = .{ .vertex_bit = true },
         .next_stage = .{ .fragment_bit = true },
-        .push_constant_ranges = &.{},
+        .push_constant_ranges = &.{pc},
     });
     const shader_obj_frag = try ShaderObject.init(device, .{
         .entry_name = "fragment",
         .source = data,
         .stage = .{ .fragment_bit = true },
         .next_stage = .{},
-        .push_constant_ranges = &.{},
+        .push_constant_ranges = &.{pc},
     });
 
     const ui_index: Buffer(u32) = try Buffer(u32).init(
@@ -165,6 +178,8 @@ pub fn init(allocator: std.mem.Allocator, window: *Window) !Renderer {
         .gpa = gpa,
 
         .texture_table = texture_table,
+        .desc_layout = desc_layout,
+        .pipeline_layout = pipeline_layout,
         .shader_obj_vert = shader_obj_vert,
         .shader_obj_frag = shader_obj_frag,
         .ui_index = ui_index,
@@ -414,7 +429,6 @@ pub fn begin(self: *Renderer, size: Window.Size, options: BeginOptions) !void {
 }
 
 pub fn draw(self: *Renderer, ui_vertices: []const FrameData.UiVertex) !void {
-    _ = ui_vertices;
     const device = self.device;
     const frame_data = self.frames[self.frame_index % frames_in_flight];
 
@@ -422,7 +436,6 @@ pub fn draw(self: *Renderer, ui_vertices: []const FrameData.UiVertex) !void {
 
     device.proxy.cmdSetPolygonModeEXT(frame_data.command_buffer, .fill);
     device.proxy.cmdSetPrimitiveTopology(frame_data.command_buffer, .triangle_list);
-    // device.proxy.cmdSetLineWidth(self.command_buffer, 1);
 
     device.proxy.cmdSetPrimitiveRestartEnable(frame_data.command_buffer, .false);
     device.proxy.cmdSetVertexInputEXT(
@@ -431,10 +444,25 @@ pub fn draw(self: *Renderer, ui_vertices: []const FrameData.UiVertex) !void {
         null,
     );
 
-    device.proxy.cmdDraw(
+    try frame_data.ui_verecies.upload(ui_vertices, device);
+    const pc: FrameData.PushConstant = .{
+        .vertex_buffer = frame_data.ui_verecies.getAddress(device),
+    };
+    device.proxy.cmdBindIndexBuffer(frame_data.command_buffer, self.ui_index.handle, 0, .uint32);
+    device.proxy.cmdPushConstants(
         frame_data.command_buffer,
-        3,
+        self.pipeline_layout.handle,
+        .{ .vertex_bit = true, .fragment_bit = true },
+        0,
+        @sizeOf(FrameData.PushConstant),
+        &pc,
+    );
+
+    device.proxy.cmdDrawIndexed(
+        frame_data.command_buffer,
+        @intCast(ui_vertices.len / 4 * 6),
         1,
+        0,
         0,
         0,
     );

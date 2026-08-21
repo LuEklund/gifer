@@ -44,7 +44,12 @@ pub fn main(init: std.process.Init) !void {
 
     // Renderer.Shader(.{.vertex_bit = true,}).initFromSlice(, source: []const u8, options: InitOptions)
 
-    const verts: [4]Renderer.UiVertex = undefined;
+    const verts: [4]Renderer.UiVertex = .{
+        .{ .position = .{ -0.5, -0.5, 0 }, .color = .{ 1, 0, 0, 1 } }, // top-left
+        .{ .position = .{ 0.5, -0.5, 0 }, .color = .{ 0, 1, 0, 1 } }, // top-right
+        .{ .position = .{ 0.5, 0.5, 0 }, .color = .{ 0, 0, 1, 1 } }, // bottom-right
+        .{ .position = .{ -0.5, 0.5, 0 }, .color = .{ 1, 1, 1, 1 } }, // bottom-left
+    };
     while (!window.should_close) {
         try window.poll(.{});
 

@@ -16,9 +16,11 @@ const Device = @import("Renderer/Device.zig");
 const Swapchain = @import("Renderer/Swapchain.zig");
 const FrameData = @import("Renderer/FrameData.zig");
 const ShaderObject = @import("Renderer/ShaderObject.zig");
-const Buffer = @import("Renderer/Buffer.zig");
+const Buffer = @import("Renderer/Buffer.zig").Buffer;
 const Image = @import("Renderer/Image.zig");
 const TextureTable = @import("Renderer/TextureTable.zig");
+
+pub const UiVertex = FrameData.UiVertex;
 
 gpa: std.mem.Allocator,
 
@@ -35,6 +37,7 @@ swapchain: Swapchain,
 texture_table: TextureTable,
 shader_obj_vert: ShaderObject,
 shader_obj_frag: ShaderObject,
+ui_index: Buffer(u32),
 
 frames: [frames_in_flight]FrameData,
 frame_index: usize,
@@ -117,7 +120,7 @@ pub fn init(allocator: std.mem.Allocator, window: *Window) !Renderer {
 
     var frame_datas: [frames_in_flight]FrameData = undefined;
     for (&frame_datas) |*frame_data| {
-        try frame_data.init(device);
+        try frame_data.init(physical_device, device);
     }
 
     var texture_table: TextureTable = .{};
@@ -143,12 +146,28 @@ pub fn init(allocator: std.mem.Allocator, window: *Window) !Renderer {
         .push_constant_ranges = &.{},
     });
 
+    const ui_index: Buffer(u32) = try Buffer(u32).init(
+        FrameData.max_ui_indices,
+        physical_device,
+        device,
+        .{ .index_buffer_bit = true, .shader_device_address_bit = true },
+        .{ .host_visible_bit = true },
+    );
+
+    var index_data: [FrameData.max_ui_indices]u32 = undefined;
+    for (0..FrameData.max_ui_quads) |quad_index| {
+        const base: u32 = @as(u32, @intCast(quad_index)) * 4;
+        index_data[quad_index * 6 ..][0..6].* = .{ base, base + 1, base + 2, base + 2, base + 3, base };
+    }
+    try ui_index.upload(&index_data, device);
+
     return .{
         .gpa = gpa,
 
         .texture_table = texture_table,
         .shader_obj_vert = shader_obj_vert,
         .shader_obj_frag = shader_obj_frag,
+        .ui_index = ui_index,
 
         .dynlib = dynlib,
 
@@ -394,7 +413,8 @@ pub fn begin(self: *Renderer, size: Window.Size, options: BeginOptions) !void {
     device.proxy.cmdBindShadersEXT(frame_data.command_buffer, &.{.{ .fragment_bit = true }}, &.{self.shader_obj_frag.handle});
 }
 
-pub fn draw(self: *Renderer) !void {
+pub fn draw(self: *Renderer, ui_vertices: []const FrameData.UiVertex) !void {
+    _ = ui_vertices;
     const device = self.device;
     const frame_data = self.frames[self.frame_index % frames_in_flight];
 
@@ -497,8 +517,6 @@ pub fn submit(self: *Renderer) !void {
 
     self.frame_index += 1;
 }
-
-// pub fn uploadShader(self: *Renderer,
 
 pub fn bindDefaultState(self: FrameData, device: Device) void {
     const command_buffer = self.command_buffer;

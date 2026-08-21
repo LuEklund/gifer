@@ -2,7 +2,7 @@ const Image = @This();
 
 const vk = @import("vulkan");
 
-const Buffer = @import("Buffer.zig");
+const Buffer = @import("Buffer.zig").Buffer;
 const Device = @import("Device.zig");
 const PhysicalDevice = @import("PhysicalDevice.zig");
 
@@ -12,8 +12,6 @@ view: vk.ImageView,
 
 format: vk.Format,
 size: vk.Extent2D,
-
-
 
 pub fn init(
     device: Device,
@@ -119,14 +117,14 @@ pub fn deinit(self: Image, device: Device) void {
 }
 
 pub fn uploadData(self: *Image, device: Device, physical_device: PhysicalDevice, data: []const u8) !void {
-    var staging: Buffer = try .init(
-        u8,
+    var staging: Buffer(u8) = try .init(
+        data.len,
         physical_device,
         device,
         .{ .transfer_src_bit = true },
         .{ .host_visible_bit = true, .host_coherent_bit = true },
-        data,
     );
+    try staging.upload(data, device);
     defer staging.deinit(device);
     errdefer staging.deinit(device);
 

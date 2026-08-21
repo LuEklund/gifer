@@ -44,13 +44,14 @@ pub fn main(init: std.process.Init) !void {
 
     // Renderer.Shader(.{.vertex_bit = true,}).initFromSlice(, source: []const u8, options: InitOptions)
 
+    const verts: [4]Renderer.UiVertex = undefined;
     while (!window.should_close) {
         try window.poll(.{});
 
         try renderer.resize(window.size);
 
         try renderer.begin(window.size, .{ .clear_color = .{ 1.0, 0.0, 0.0, 1.0 } });
-        try renderer.draw();
+        try renderer.draw(&verts);
         try renderer.submit();
     }
 }

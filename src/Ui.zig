@@ -33,6 +33,11 @@ pub fn key(name: []const u8) u64 {
     return std.hash.Wyhash.hash(0, name);
 }
 
+pub fn rect(self: *const Ui, name: []const u8) ?Rect {
+    const i = self.names.get(key(name)) orelse return null;
+    return self.nodes.items[i].rect;
+}
+
 pub const Quad = struct {
     rect: Rect,
     color: [4]f32,
@@ -65,7 +70,7 @@ const MouseState = struct {
     right_click: bool = false,
 };
 
-const Rect = struct {
+pub const Rect = struct {
     left: f32,
     top: f32,
     width: f32,
@@ -336,11 +341,8 @@ fn screenRect(self: *const Ui) Rect {
 
 fn pushQuads(self: *Ui) void {
     for (self.nodes.items) |node| {
-        const rect = node.rect;
-        if (node.layout.color.a != 0) {
-            const colors: [4]f32 = node.layout.color.toVec();
-            self.quads.appendAssumeCapacity(.{ .rect = rect, .color = colors, .texture_handle = node.layout.texture });
-        }
+        const colors: [4]f32 = node.layout.color.toVec();
+        self.quads.appendAssumeCapacity(.{ .rect = node.rect, .color = colors, .texture_handle = node.layout.texture });
         // if (node.layout.text) |text| {
         //     const color = text.color.toVec();
         //     const font = self.default_font;

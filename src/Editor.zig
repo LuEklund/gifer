@@ -26,18 +26,26 @@ const Input = struct {
 };
 pub const Output = struct {
     ui_vertices: []const Renderer.UiVertex,
-    play: State,
-    pub const State = union(enum) { none, toggle, playhead: f32 };
+    action: Action,
+    pub const Action = union(enum) {
+        none,
+        toggle,
+        playhead: f32,
+        trim_from_start,
+        trim_from_end,
+    };
 };
 pub fn update(self: *Editor, window: *Window, input: Input) Output {
     const playehead = constructUi(window, &self.ui, input);
     self.vertices.clearRetainingCapacity();
     make(self.ui.quads, &self.vertices);
 
-    var action: Output.State = if (window.keyboard.get(.space) == .press) .toggle else .none;
+    var action: Output.Action = if (window.keyboard.get(.space) == .press) .toggle else .none;
     if (playehead) |new_playhead| action = .{ .playhead = new_playhead };
+    if (window.keyboard.get(.c) == .press) action = .trim_from_start;
+    if (window.keyboard.get(.d) == .press) action = .trim_from_end;
 
-    return .{ .ui_vertices = self.vertices.items, .play = action };
+    return .{ .ui_vertices = self.vertices.items, .action = action };
 }
 
 fn constructUi(window: *Window, ui: *Ui, inputs: Input) ?f32 {
@@ -65,7 +73,7 @@ fn constructUi(window: *Window, ui: *Ui, inputs: Input) ?f32 {
 
     ui.add("display", .{
         .size = .{ .percent = .{ .width = 1, .height = 0.5 } },
-        .color = .new(0.5, 0.5, 0.5, 1),
+        .color = .new(1, 1, 1, 1),
         .texture = @intFromEnum(inputs.display),
     });
 
@@ -102,7 +110,11 @@ fn constructUi(window: *Window, ui: *Ui, inputs: Input) ?f32 {
     });
 
     ui.end();
-    return if (ui.isDragging("timeline")) ui.mouse_state.position.left / ui.screen_height else null;
+    if (ui.isDragging("timeline") or ui.isDragging("playhead")) {
+        const tl = ui.rect("timeline") orelse return null;
+        return std.math.clamp((ui.mouse_state.position.left - tl.left) / tl.width, 0, 1);
+    }
+    return null;
 }
 
 fn make(quads: std.ArrayList(Ui.Quad), vertices: *std.ArrayList(Renderer.UiVertex)) void {

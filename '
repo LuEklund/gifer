@@ -24,7 +24,7 @@ pub const Clip = struct {
     previous_index: usize,
 
     counter: usize,
-    orderd: std.ArrayList(u32),
+    orderd: []u32 = undefined,
 };
 
 fn init(self: *System, gpa: std.mem.Allocator, io: std.Io, window: *Window) !void {
@@ -57,15 +57,13 @@ fn deinit(self: *System) void {
     self.renderer.deinit();
     for (self.clip.frames.items) |frame| self.gpa.free(frame);
     self.clip.frames.deinit(self.gpa);
-    self.clip.orderd.deinit(self.gpa);
 }
 
 fn update(self: *System, window: *Window) !void {
     if (self.playing) {
         self.clip.counter += 1;
     }
-    const virtual_index = self.clip.counter / playspeed % self.clip.orderd.items.len;
-    self.clip.index = self.clip.orderd.items[virtual_index];
+    self.clip.index = self.clip.counter / playspeed % self.clip.frames.items.len;
     if (self.clip.previous_index != self.clip.index) {
         self.display_handle = try self.renderer.uploadTexture(self.display_handle, .{
             .height = self.clip.info.height,
@@ -82,19 +80,13 @@ fn update(self: *System, window: *Window) !void {
         window,
         .{
             .display = self.display_handle,
-            .playhead = @as(f32, @floatFromInt(virtual_index)) / @as(f32, @floatFromInt(self.clip.orderd.items.len)),
+            .playhead = @as(f32, @floatFromInt(self.clip.index)) / @as(f32, @floatFromInt(self.clip.frames.items.len)),
         },
     );
-    // std.log.debug("{d} : {d}", .{ virtual_index, self.clip.orderd.items.len });
     switch (output.action) {
-        .playhead => |new_playhead| self.clip.counter = @as(usize, @intFromFloat(new_playhead * @as(f32, @floatFromInt(self.clip.orderd.items.len)))) * playspeed,
+        .playhead => |new_playhead| self.clip.counter = @as(usize, @intFromFloat(new_playhead * @as(f32, @floatFromInt(self.clip.frames.items.len)))) * playspeed,
         .toggle => self.playing = !self.playing,
-        .trim_from_start => try self.clip.orderd.replaceRange(self.gpa, 0, virtual_index, &.{}),
-        .trim_from_end => {
-            std.log.debug("happend {d} : {d}", .{ virtual_index, self.clip.orderd.items.len });
-
-            try self.clip.orderd.replaceRange(self.gpa, virtual_index, self.clip.orderd.items.len - virtual_index, &.{});
-        },
+        .trim_from  => |trim_from| 
         .none => {},
     }
 
@@ -139,17 +131,7 @@ pub fn load(gpa: std.mem.Allocator, io: std.Io, path: []const u8) !Clip {
     }
     _ = try child.wait(io);
 
-    var ordered: std.ArrayList(u32) = try .initCapacity(gpa, frames.items.len);
-    for (0..ordered.capacity) |i| ordered.appendAssumeCapacity(@intCast(i));
-
-    return .{
-        .info = info,
-        .frames = frames,
-        .index = 0,
-        .previous_index = 0,
-        .counter = 0,
-        .orderd = ordered,
-    };
+    return .{ .info = info, .frames = frames, .index = 0, .previous_index = 0, .counter = 0 };
 }
 
 fn probe(gpa: std.mem.Allocator, io: std.Io, path: []const u8) !Info {

@@ -36,6 +36,7 @@ pub fn key(name: []const u8) u64 {
 pub const Quad = struct {
     rect: Rect,
     color: [4]f32,
+    texture_handle: u32,
 };
 
 const Node = struct {
@@ -164,6 +165,7 @@ pub fn start(
 
 pub fn end(self: *Ui) void {
     self.resolveLayout();
+
     self.pushQuads();
 
     var index: usize = 0;
@@ -337,7 +339,7 @@ fn pushQuads(self: *Ui) void {
         const rect = node.rect;
         if (node.layout.color.a != 0) {
             const colors: [4]f32 = node.layout.color.toVec();
-            self.quads.appendAssumeCapacity(.{ .rect = rect, .color = colors });
+            self.quads.appendAssumeCapacity(.{ .rect = rect, .color = colors, .texture_handle = node.layout.texture });
         }
         // if (node.layout.text) |text| {
         //     const color = text.color.toVec();

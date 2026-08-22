@@ -6,18 +6,24 @@ const Renderer = @import("Renderer.zig");
 const Capture = @import("Capture.zig");
 const Editor = @import("Editor.zig");
 
+const playspeed: u32 = 60;
+
 gpa: std.mem.Allocator,
 io: std.Io,
 renderer: Renderer,
 editor: Editor,
 clip: Clip,
-display_handle: u32,
-counter: usize,
+display_handle: Renderer.TextureHandle,
+playing: bool,
 
 pub const Info = struct { width: u32, height: u32, fps_num: u32, fps_den: u32 };
 pub const Clip = struct {
     info: Info,
     frames: std.ArrayList([]u8), // each info.width*info.height*4 bytes, RGBA
+    index: usize,
+    previous_index: usize,
+
+    counter: usize,
 };
 
 fn init(self: *System, gpa: std.mem.Allocator, io: std.Io, window: *Window) !void {
@@ -37,12 +43,12 @@ fn init(self: *System, gpa: std.mem.Allocator, io: std.Io, window: *Window) !voi
     self.clip = try load(gpa, io, "/tmp/test.mp4");
 
     std.debug.print("{} frames, {}x{}\n", .{ self.clip.frames.items.len, self.clip.info.width, self.clip.info.height });
-    self.display_handle = @intFromEnum(try self.renderer.createTexture(.{
+    self.display_handle = try self.renderer.uploadTexture(null, .{
         .height = self.clip.info.height,
         .width = self.clip.info.width,
         .data = self.clip.frames.items[0],
-    }));
-    self.counter = 0;
+    });
+    self.playing = false;
 }
 
 fn deinit(self: *System) void {
@@ -53,23 +59,41 @@ fn deinit(self: *System) void {
 }
 
 fn update(self: *System, window: *Window) !void {
-    self.counter += 1;
-    self.display_handle = if (self.counter % 100 == 0) @intFromEnum(try self.renderer.updateTexture(@enumFromInt(self.display_handle), .{
-        .height = self.clip.info.height,
-        .width = self.clip.info.width,
-        .data = self.clip.frames.items[self.counter % self.clip.frames.items.len],
-    })) else self.display_handle;
+    if (self.playing) {
+        self.clip.counter += 1;
+    }
+    self.clip.index = self.clip.counter / playspeed % self.clip.frames.items.len;
+    if (self.clip.previous_index != self.clip.index) {
+        self.display_handle = try self.renderer.uploadTexture(self.display_handle, .{
+            .height = self.clip.info.height,
+            .width = self.clip.info.width,
+            .data = self.clip.frames.items[self.clip.index],
+        });
+        self.clip.previous_index = self.clip.index;
+    }
     try self.renderer.updateShaders(self.io);
     try self.renderer.resize(window.size);
     try self.renderer.begin(window.size, .{ .clear_color = .{ 0.0, 0.0, 0.0, 1.0 } });
 
-    const ui_vertices = self.editor.update(window, self.display_handle);
+    const output = self.editor.update(
+        window,
+        .{
+            .display = self.display_handle,
+            .playhead = @as(f32, @floatFromInt(self.clip.index)) / @as(f32, @floatFromInt(self.clip.frames.items.len)),
+        },
+    );
+    switch (output.play) {
+        .playhead => |new_playhead| self.clip.counter = @as(usize, @intFromFloat(new_playhead * @as(f32, @floatFromInt(self.clip.frames.items.len)))) * playspeed,
+        .toggle => self.playing = !self.playing,
+        .none => {},
+    }
+
     try self.renderer.draw(.{
         .screen_size = .{
             .height = @floatFromInt(window.size.height),
             .width = @floatFromInt(window.size.width),
         },
-        .ui_vertices = ui_vertices,
+        .ui_vertices = output.ui_vertices,
     });
     try self.renderer.submit();
 }
@@ -105,7 +129,7 @@ pub fn load(gpa: std.mem.Allocator, io: std.Io, path: []const u8) !Clip {
     }
     _ = try child.wait(io);
 
-    return .{ .info = info, .frames = frames };
+    return .{ .info = info, .frames = frames, .index = 0, .previous_index = 0, .counter = 0 };
 }
 
 fn probe(gpa: std.mem.Allocator, io: std.Io, path: []const u8) !Info {

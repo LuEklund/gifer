@@ -22,6 +22,7 @@ const Buffer = @import("Renderer/Buffer.zig").Buffer;
 const Image = @import("Renderer/Image.zig");
 const TexturePool = @import("Renderer/TextureTable.zig");
 
+pub const TextureHandle = TexturePool.Handle;
 pub const UiVertex = FrameData.UiVertex;
 pub const max_ui_quads = FrameData.max_ui_quads;
 const push_constant_range: vk.PushConstantRange = .{
@@ -272,7 +273,7 @@ pub const BeginOptions = struct {
 pub fn begin(self: *Renderer, size: Window.Size, options: BeginOptions) !void {
     const device = self.device;
     const swapchain = &self.swapchain;
-    self.texture_table.update(device, self.frame_index);
+    self.texture_table.reclaim(device, self.frame_index);
 
     try self.resize(size);
 
@@ -623,9 +624,9 @@ pub fn bindDefaultState(self: FrameData, device: Device) void {
     device.proxy.cmdSetAlphaToOneEnableEXT(command_buffer, .false);
 
     // depth/stencil
-    device.proxy.cmdSetDepthTestEnable(command_buffer, .true);
-    device.proxy.cmdSetDepthWriteEnable(command_buffer, .true);
-    device.proxy.cmdSetDepthCompareOp(command_buffer, .less);
+    device.proxy.cmdSetDepthTestEnable(command_buffer, .false);
+    device.proxy.cmdSetDepthWriteEnable(command_buffer, .false);
+    // device.proxy.cmdSetDepthCompareOp(command_buffer, .less);
     device.proxy.cmdSetDepthBoundsTestEnable(command_buffer, .false);
     device.proxy.cmdSetStencilTestEnable(command_buffer, .false);
 
@@ -746,10 +747,7 @@ pub fn updateShaders(self: *Renderer, io: std.Io) !void {
     std.log.info("reloaded shaders", .{});
 }
 
-pub fn createTexture(self: *Renderer, info: TexturePool.Info) !TexturePool.Handle {
-    return try self.texture_table.createTexture(self.device, self.physical_device, info);
-}
-
-pub fn updateTexture(self: *Renderer, handle: TexturePool.Handle, info: TexturePool.Info) !TexturePool.Handle {
-    return try self.texture_table.updateTexture(handle, self.device, self.physical_device, info, self.frame_index);
+pub fn uploadTexture(self: *Renderer, replace: ?TexturePool.Handle, info: TexturePool.Info) !TexturePool.Handle {
+    if (replace) |handle| self.texture_table.retire(handle, self.frame_index);
+    return try self.texture_table.alloc(self.device, self.physical_device, info);
 }

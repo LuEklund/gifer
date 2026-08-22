@@ -64,7 +64,7 @@ pub fn init(self: *TexturePool, device: Device, physical_device: PhysicalDevice,
         .mip_lod_bias = 0,
     };
     self.default_sampler = try device.proxy.createSampler(&sampler_info, null);
-    _ = try self.createTexture(device, physical_device, .{
+    _ = try self.alloc(device, physical_device, .{
         .width = 1,
         .height = 1,
         .data = &.{ 255, 255, 255, 255 },
@@ -76,7 +76,7 @@ pub fn deinit(self: *TexturePool, device: Device) void {
         self.table[handle].image.deinit(device);
 }
 
-pub fn update(self: *TexturePool, device: Device, current_frame: usize) void {
+pub fn reclaim(self: *TexturePool, device: Device, current_frame: usize) void {
     for (&self.table) |*table| switch (table.state) {
         .retired => |retired_frame| if (retired_frame + frames_in_flight < current_frame) {
             table.image.deinit(device);
@@ -86,7 +86,7 @@ pub fn update(self: *TexturePool, device: Device, current_frame: usize) void {
     };
 }
 
-pub fn createTexture(self: *TexturePool, device: Device, physical_device: PhysicalDevice, info: Info) !Handle {
+pub fn alloc(self: *TexturePool, device: Device, physical_device: PhysicalDevice, info: Info) !Handle {
     const handle: Handle = for (0..self.table.len) |i| {
         if (self.table[i].state == .unused) break @enumFromInt(i);
     } else return error.Full;
@@ -123,9 +123,6 @@ pub fn createTexture(self: *TexturePool, device: Device, physical_device: Physic
     return handle;
 }
 
-// pub fn destroyTexture(self: *TextureTable, handle: Handle, device: Device) void {}
-
-pub fn updateTexture(self: *TexturePool, handle: Handle, device: Device, physical_device: PhysicalDevice, info: Info, retired_frame: usize) !Handle {
-    self.table[@intFromEnum(handle)].state = .{ .retired = retired_frame };
-    return try self.createTexture(device, physical_device, info);
+pub fn retire(self: *TexturePool, handle: Handle, frame: usize) void {
+    self.table[@intFromEnum(handle)].state = .{ .retired = frame };
 }

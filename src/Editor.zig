@@ -20,14 +20,27 @@ pub fn deinit(self: *Editor, gpa: std.mem.Allocator) void {
     self.ui.deinit(gpa);
 }
 
-pub fn update(self: *Editor, window: *Window, h: u32) []const Renderer.UiVertex {
-    drawUi(window, &self.ui);
+const Input = struct {
+    display: Renderer.TextureHandle,
+    playhead: f32,
+};
+pub const Output = struct {
+    ui_vertices: []const Renderer.UiVertex,
+    play: State,
+    pub const State = union(enum) { none, toggle, playhead: f32 };
+};
+pub fn update(self: *Editor, window: *Window, input: Input) Output {
+    const playehead = constructUi(window, &self.ui, input);
     self.vertices.clearRetainingCapacity();
-    make(self.ui.quads, &self.vertices, h);
-    return self.vertices.items;
+    make(self.ui.quads, &self.vertices);
+
+    var action: Output.State = if (window.keyboard.get(.space) == .press) .toggle else .none;
+    if (playehead) |new_playhead| action = .{ .playhead = new_playhead };
+
+    return .{ .ui_vertices = self.vertices.items, .play = action };
 }
 
-fn drawUi(window: *Window, ui: *Ui) void {
+fn constructUi(window: *Window, ui: *Ui, inputs: Input) ?f32 {
     const window_ptr = window.pointer;
     const mouse_pos = window_ptr.movement.position;
     ui.start(.{
@@ -53,42 +66,46 @@ fn drawUi(window: *Window, ui: *Ui) void {
     ui.add("display", .{
         .size = .{ .percent = .{ .width = 1, .height = 0.5 } },
         .color = .new(0.5, 0.5, 0.5, 1),
+        .texture = @intFromEnum(inputs.display),
     });
 
+    const timeline_h: f32 = 0.15;
     ui.add(null, .{
-        .name = "timeline",
         .size = .{
             .percent = .{ .height = 1, .width = 1 },
         },
         .child_anchor = .{ .x = .start, .y = .end },
+        .axis_align = .vertical,
+        .children = &.{
+
+        //     .{
+        //     .size = .{ .percent = .{ .width = 1, .height = 0.1 } },
+        //     .color = .new(0.5, 0.5, 0.5, 1),
+        // },
+
+        .{
+            .name = "timeline",
+            .size = .{
+                .percent = .{ .width = 1, .height = timeline_h },
+            },
+            .color = .new(0.4, 0.4, 0.4, 1),
+        }},
     });
 
-    const timeline_h: f32 = 0.15;
+    ui.add("timeline", .{ .size = .{
+        .percent = .{ .width = inputs.playhead, .height = 0 },
+    } });
     ui.add("timeline", .{
-        .size = .{
-            .percent = .{ .width = 1, .height = timeline_h },
-        },
-        .color = .new(0.4, 0.4, 0.4, 1),
-    });
-    ui.add("timeline", .{
-        .size = .{ .percent = .{ .height = timeline_h, .width = 0.01 } },
-        .color = .new(1, 1, 1, 1),
-        .floating = true,
-    });
-
-    ui.add(null, .{
-        .name = "test",
-        .size = .{ .fixed = .{
-            .width = 200,
-            .height = 100,
-        } },
-        .color = if (ui.isHovered("test")) .new(1, 0, 0, 1) else .new(0, 1, 0, 1),
+        .name = "playhead",
+        .size = .{ .percent = .{ .height = 1, .width = 0.01 } },
+        .color = if (ui.isHovered("playhead")) .new(1, 1, 1, 1) else .new(1, 1, 1, 0.5),
     });
 
     ui.end();
+    return if (ui.isDragging("timeline")) ui.mouse_state.position.left / ui.screen_height else null;
 }
 
-fn make(quads: std.ArrayList(Ui.Quad), vertices: *std.ArrayList(Renderer.UiVertex), text_handle: u32) void {
+fn make(quads: std.ArrayList(Ui.Quad), vertices: *std.ArrayList(Renderer.UiVertex)) void {
     for (quads.items) |quad| {
         const rect = quad.rect;
         const color = quad.color;
@@ -97,25 +114,25 @@ fn make(quads: std.ArrayList(Ui.Quad), vertices: *std.ArrayList(Renderer.UiVerte
                 .color = color,
                 .position = .{ rect.left, rect.top },
                 .uv = .{ 0, 0 },
-                .texture_id = text_handle,
+                .texture_id = quad.texture_handle,
             },
             .{
                 .position = .{ rect.left + rect.width, rect.top },
                 .color = color,
                 .uv = .{ 1, 0 },
-                .texture_id = text_handle,
+                .texture_id = quad.texture_handle,
             },
             .{
                 .position = .{ rect.left + rect.width, rect.top + rect.height },
                 .color = color,
                 .uv = .{ 1, 1 },
-                .texture_id = text_handle,
+                .texture_id = quad.texture_handle,
             },
             .{
                 .position = .{ rect.left, rect.top + rect.height },
                 .color = color,
                 .uv = .{ 0, 1 },
-                .texture_id = text_handle,
+                .texture_id = quad.texture_handle,
             },
         });
         // if (node.layout.text) |text| {

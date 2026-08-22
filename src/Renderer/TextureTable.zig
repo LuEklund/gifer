@@ -1,4 +1,4 @@
-const TextureTable = @This();
+const TexturePool = @This();
 
 const vk = @import("vulkan");
 const Buffer = @import("Buffer.zig").Buffer;
@@ -7,8 +7,9 @@ const Device = @import("Device.zig");
 const PhysicalDevice = @import("PhysicalDevice.zig");
 const DescriptorLayout = @import("DescriptorLayout.zig");
 
-table: [256]Image = undefined,
-next_handle: Handle = .blank,
+const frames_in_flight = @import("../Renderer.zig").frames_in_flight;
+
+table: [256]struct { state: State, image: Image } = undefined,
 
 descriptor_buffer: Buffer(u8),
 descriptor_layout_size: u64,
@@ -19,13 +20,20 @@ pub const Handle = enum(u32) {
     _,
 };
 
+const State = union(enum) {
+    unused,
+    used,
+    retired: usize,
+};
 pub const Info = struct {
     data: []const u8,
     width: u32,
     height: u32,
 };
 
-pub fn init(self: *TextureTable, device: Device, physical_device: PhysicalDevice, texture_layout: DescriptorLayout) !void {
+pub fn init(self: *TexturePool, device: Device, physical_device: PhysicalDevice, texture_layout: DescriptorLayout) !void {
+    for (0..self.table.len) |i| self.table[i].state = .unused;
+
     self.descriptor_layout_size = device.proxy.getDescriptorSetLayoutSizeEXT(texture_layout.handle);
     self.descriptor_buffer = try Buffer(u8).init(
         self.descriptor_layout_size,
@@ -38,7 +46,6 @@ pub fn init(self: *TextureTable, device: Device, physical_device: PhysicalDevice
         },
         .{ .host_visible_bit = true },
     );
-    self.next_handle = .blank;
     var sampler_info: vk.SamplerCreateInfo = .{
         .address_mode_u = .clamp_to_border,
         .address_mode_v = .clamp_to_border,
@@ -64,14 +71,25 @@ pub fn init(self: *TextureTable, device: Device, physical_device: PhysicalDevice
     });
 }
 
-pub fn deinit(self: *TextureTable, device: Device) void {
-    for (0..@intFromEnum(self.next_handle)) |handle| {
-        self.table[handle].deinit(device);
-    }
+pub fn deinit(self: *TexturePool, device: Device) void {
+    for (0..self.table.len) |handle| if (self.table[handle].state != .unused)
+        self.table[handle].image.deinit(device);
 }
 
-pub fn createTexture(self: *TextureTable, device: Device, physical_device: PhysicalDevice, info: Info) !Handle {
-    const handle = self.next_handle;
+pub fn update(self: *TexturePool, device: Device, current_frame: usize) void {
+    for (&self.table) |*table| switch (table.state) {
+        .retired => |retired_frame| if (retired_frame + frames_in_flight < current_frame) {
+            table.image.deinit(device);
+            table.state = .unused;
+        },
+        else => {},
+    };
+}
+
+pub fn createTexture(self: *TexturePool, device: Device, physical_device: PhysicalDevice, info: Info) !Handle {
+    const handle: Handle = for (0..self.table.len) |i| {
+        if (self.table[i].state == .unused) break @enumFromInt(i);
+    } else return error.Full;
     var new_image: Image = try .init(
         device,
         physical_device,
@@ -101,7 +119,13 @@ pub fn createTexture(self: *TextureTable, device: Device, physical_device: Physi
         physical_device.sampler_descriptor_size,
         destinaiton,
     );
-    self.table[@intFromEnum(self.next_handle)] = new_image;
-    self.next_handle = @enumFromInt(1 + @intFromEnum(self.next_handle));
+    self.table[@intFromEnum(handle)] = .{ .state = .used, .image = new_image };
     return handle;
+}
+
+// pub fn destroyTexture(self: *TextureTable, handle: Handle, device: Device) void {}
+
+pub fn updateTexture(self: *TexturePool, handle: Handle, device: Device, physical_device: PhysicalDevice, info: Info, retired_frame: usize) !Handle {
+    self.table[@intFromEnum(handle)].state = .{ .retired = retired_frame };
+    return try self.createTexture(device, physical_device, info);
 }

@@ -20,10 +20,10 @@ pub fn deinit(self: *Editor, gpa: std.mem.Allocator) void {
     self.ui.deinit(gpa);
 }
 
-pub fn update(self: *Editor, window: *Window) []const Renderer.UiVertex {
+pub fn update(self: *Editor, window: *Window, h: u32) []const Renderer.UiVertex {
     drawUi(window, &self.ui);
     self.vertices.clearRetainingCapacity();
-    make(self.ui.quads, &self.vertices);
+    make(self.ui.quads, &self.vertices, h);
     return self.vertices.items;
 }
 
@@ -62,11 +62,18 @@ fn drawUi(window: *Window, ui: *Ui) void {
         },
         .child_anchor = .{ .x = .start, .y = .end },
     });
+
+    const timeline_h: f32 = 0.15;
     ui.add("timeline", .{
         .size = .{
-            .percent = .{ .width = 1, .height = 0.15 },
+            .percent = .{ .width = 1, .height = timeline_h },
         },
         .color = .new(0.4, 0.4, 0.4, 1),
+    });
+    ui.add("timeline", .{
+        .size = .{ .percent = .{ .height = timeline_h, .width = 0.01 } },
+        .color = .new(1, 1, 1, 1),
+        .floating = true,
     });
 
     ui.add(null, .{
@@ -81,7 +88,7 @@ fn drawUi(window: *Window, ui: *Ui) void {
     ui.end();
 }
 
-fn make(quads: std.ArrayList(Ui.Quad), vertices: *std.ArrayList(Renderer.UiVertex)) void {
+fn make(quads: std.ArrayList(Ui.Quad), vertices: *std.ArrayList(Renderer.UiVertex), text_handle: u32) void {
     for (quads.items) |quad| {
         const rect = quad.rect;
         const color = quad.color;
@@ -90,25 +97,25 @@ fn make(quads: std.ArrayList(Ui.Quad), vertices: *std.ArrayList(Renderer.UiVerte
                 .color = color,
                 .position = .{ rect.left, rect.top },
                 .uv = .{ 0, 0 },
-                .texture_id = 1,
+                .texture_id = text_handle,
             },
             .{
                 .position = .{ rect.left + rect.width, rect.top },
                 .color = color,
                 .uv = .{ 1, 0 },
-                .texture_id = 1,
+                .texture_id = text_handle,
             },
             .{
                 .position = .{ rect.left + rect.width, rect.top + rect.height },
                 .color = color,
                 .uv = .{ 1, 1 },
-                .texture_id = 1,
+                .texture_id = text_handle,
             },
             .{
                 .position = .{ rect.left, rect.top + rect.height },
                 .color = color,
                 .uv = .{ 0, 1 },
-                .texture_id = 1,
+                .texture_id = text_handle,
             },
         });
         // if (node.layout.text) |text| {

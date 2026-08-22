@@ -12,6 +12,7 @@ renderer: Renderer,
 editor: Editor,
 clip: Clip,
 display_handle: u32,
+counter: usize,
 
 pub const Info = struct { width: u32, height: u32, fps_num: u32, fps_den: u32 };
 pub const Clip = struct {
@@ -41,6 +42,7 @@ fn init(self: *System, gpa: std.mem.Allocator, io: std.Io, window: *Window) !voi
         .width = self.clip.info.width,
         .data = self.clip.frames.items[0],
     }));
+    self.counter = 0;
 }
 
 fn deinit(self: *System) void {
@@ -51,16 +53,23 @@ fn deinit(self: *System) void {
 }
 
 fn update(self: *System, window: *Window) !void {
+    self.counter += 1;
+    self.display_handle = if (self.counter % 100 == 0) @intFromEnum(try self.renderer.updateTexture(@enumFromInt(self.display_handle), .{
+        .height = self.clip.info.height,
+        .width = self.clip.info.width,
+        .data = self.clip.frames.items[self.counter % self.clip.frames.items.len],
+    })) else self.display_handle;
     try self.renderer.updateShaders(self.io);
     try self.renderer.resize(window.size);
     try self.renderer.begin(window.size, .{ .clear_color = .{ 0.0, 0.0, 0.0, 1.0 } });
 
+    const ui_vertices = self.editor.update(window, self.display_handle);
     try self.renderer.draw(.{
         .screen_size = .{
             .height = @floatFromInt(window.size.height),
             .width = @floatFromInt(window.size.width),
         },
-        .ui_vertices = self.editor.update(window),
+        .ui_vertices = ui_vertices,
     });
     try self.renderer.submit();
 }

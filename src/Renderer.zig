@@ -20,7 +20,7 @@ const DescriptorLayout = @import("Renderer/DescriptorLayout.zig");
 const ShaderObject = @import("Renderer/ShaderObject.zig");
 const Buffer = @import("Renderer/Buffer.zig").Buffer;
 const Image = @import("Renderer/Image.zig");
-const TextureTable = @import("Renderer/TextureTable.zig");
+const TexturePool = @import("Renderer/TextureTable.zig");
 
 pub const UiVertex = FrameData.UiVertex;
 pub const max_ui_quads = FrameData.max_ui_quads;
@@ -43,7 +43,7 @@ physical_device: PhysicalDevice,
 device: Device,
 swapchain: Swapchain,
 
-texture_table: TextureTable,
+texture_table: TexturePool,
 pipeline_layout: PipelineLayout,
 desc_layout: DescriptorLayout,
 shader_obj_vert: ShaderObject,
@@ -167,7 +167,7 @@ pub fn init(self: *Renderer, allocator: std.mem.Allocator, io: std.Io, window: *
         &.{desc_layout.handle},
     );
 
-    var texture_table: TextureTable = undefined;
+    var texture_table: TexturePool = undefined;
     try texture_table.init(device, physical_device, desc_layout);
 
     const new_vert = try ShaderObject.init(device, .{
@@ -272,6 +272,7 @@ pub const BeginOptions = struct {
 pub fn begin(self: *Renderer, size: Window.Size, options: BeginOptions) !void {
     const device = self.device;
     const swapchain = &self.swapchain;
+    self.texture_table.update(device, self.frame_index);
 
     try self.resize(size);
 
@@ -745,6 +746,10 @@ pub fn updateShaders(self: *Renderer, io: std.Io) !void {
     std.log.info("reloaded shaders", .{});
 }
 
-pub fn createTexture(self: *Renderer, info: TextureTable.Info) !TextureTable.Handle {
+pub fn createTexture(self: *Renderer, info: TexturePool.Info) !TexturePool.Handle {
     return try self.texture_table.createTexture(self.device, self.physical_device, info);
+}
+
+pub fn updateTexture(self: *Renderer, handle: TexturePool.Handle, info: TexturePool.Info) !TexturePool.Handle {
+    return try self.texture_table.updateTexture(handle, self.device, self.physical_device, info, self.frame_index);
 }

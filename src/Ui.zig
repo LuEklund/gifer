@@ -43,11 +43,6 @@ pub fn rect(self: *const Ui, name: []const u8) Rect {
     return self.nodes.items[i].rect;
 }
 
-pub fn nodeRef(self: *const Ui, name: []const u8) ?*Node {
-    const i = self.names.get(key(name)) orelse return null;
-    return &self.nodes.items[i];
-}
-
 pub const Quad = struct {
     rect: Rect,
     color: [4]f32,
@@ -539,12 +534,3 @@ fn hoverUpdate(self: *Ui) void {
         }
     }
 }
-
-// pub fn aabb(a: Rect, b: Rect) bool {
-//
-//         if (!(self.mouse_state.position.left < node.rect.left or
-//             self.mouse_state.position.top < node.rect.top or
-//             self.mouse_state.position.left >= node.rect.left + node.rect.width or
-//             self.mouse_state.position.top >= node.rect.top + node.rect.height))
-//         {
-// }

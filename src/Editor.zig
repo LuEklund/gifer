@@ -19,6 +19,7 @@ box_select: SelectBox,
 pub const SelectBox = struct {
     state: SelectState = .none,
     region: Ui.Rect,
+    frames: struct { first: usize, count: usize } = .{ .first = 0, .count = 0 },
 
     pub const SelectState = enum {
         none,
@@ -92,6 +93,8 @@ fn constructUi(self: *Editor, window: *Window, ui: *Ui) void {
     const clip = &self.clip;
     const window_ptr = window.pointer;
     const mouse_pos = window_ptr.movement.position;
+    const region = &self.box_select.region;
+
     ui.start(.{
         .position = .{ .left = @floatCast(mouse_pos.x), .top = @floatCast(mouse_pos.y) },
         .left_click = window_ptr.buttons.left,
@@ -145,14 +148,15 @@ fn constructUi(self: *Editor, window: *Window, ui: *Ui) void {
         .size = .{ .percent = .{ .height = 1, .width = 1 } },
         .floating = true,
     });
-    const frame_width = std.math.clamp(ui.screen_width / @as(f32, @floatFromInt(clip.orderd.items.len)), 1, ui.screen_width);
-    const display_frame_count: f32 = ui.screen_width / frame_width;
-    const percent_width = frame_width / ui.screen_width;
-    for (0..@ceil(display_frame_count)) |i| {
+
+    const len = clip.orderd.items.len;
+    const slice_width = 1 / @as(f32, @floatFromInt(len));
+    const selected = self.box_select.frames;
+    for (0..len) |i| {
+        const is_selected = i >= selected.first and i < selected.first + selected.count;
         ui.add("display_frames", .{
-            .name = ui.print("frame_{d}", .{i}),
-            .size = .{ .percent = .{ .height = 1, .width = percent_width } },
-            .color = .new(1, 0.5, 0.5, 0.5),
+            .size = .{ .percent = .{ .height = 1, .width = slice_width } },
+            .color = if (is_selected) .new(0, 0, 1, 0.5) else .new(1, 0.5, 0.5, 0.5),
         });
     }
 
@@ -167,12 +171,6 @@ fn constructUi(self: *Editor, window: *Window, ui: *Ui) void {
     });
 
     if (self.box_select.state == .selecting) {
-        const region = &self.box_select.region;
-        var name_buff: [256]u8 = undefined;
-        for (0..@ceil(display_frame_count)) |i| {
-            const name = std.fmt.bufPrint(&name_buff, "frame_{d}", .{i}) catch continue;
-            if (ui.nodeRef(name)) |node| node.layout.color = .new(0, 0, 1, 1);
-        }
         ui.add(null, .{
             .offset = .{ .left = region.left, .top = region.top },
             .size = .{ .fixed = .{ .width = region.width, .height = region.height } },
@@ -187,6 +185,7 @@ fn interactUi(self: *Editor, window: *Window, ui: *Ui) void {
     const clip = &self.clip;
     const pointer = window.pointer;
     const box_select = &self.box_select;
+
     if (ui.isDragging("timeline") or ui.isDragging("playhead")) {
         const tl = ui.rect("timeline");
         const new_playhead = std.math.clamp((ui.mouse_state.position.left - tl.left) / tl.width, 0, 1);
@@ -197,8 +196,19 @@ fn interactUi(self: *Editor, window: *Window, ui: *Ui) void {
             box_select.region.left = @floatCast(pointer.movement.position.x);
             box_select.region.top = @floatCast(pointer.movement.position.y);
         } else {
-            box_select.region.width = @as(f32, @floatCast(pointer.movement.position.x)) - box_select.region.left;
-            box_select.region.height = @as(f32, @floatCast(pointer.movement.position.y)) - box_select.region.top;
+            const region = &box_select.region;
+            region.width = @as(f32, @floatCast(pointer.movement.position.x)) - region.left;
+            region.height = @as(f32, @floatCast(pointer.movement.position.y)) - region.top;
+
+            const timeline_rect = ui.rect("timeline");
+            const frame_count: f32 = @floatFromInt(clip.orderd.items.len);
+            const box_left = @min(region.left, region.left + region.width);
+            const box_right = @max(region.left, region.left + region.width);
+            const first_index: usize = @intFromFloat(std.math.clamp((box_left - timeline_rect.left) /
+                timeline_rect.width, 0, 1) * frame_count);
+            const last_index: usize = @intFromFloat(std.math.clamp((box_right - timeline_rect.left) /
+                timeline_rect.width, 0, 1) * frame_count);
+            box_select.frames = .{ .first = first_index, .count = last_index - first_index };
         }
     } else if (box_select.state == .selecting) box_select.state = .none;
 }

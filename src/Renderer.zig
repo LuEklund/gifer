@@ -22,6 +22,7 @@ const Buffer = @import("Renderer/Buffer.zig").Buffer;
 const Image = @import("Renderer/Image.zig");
 const TexturePool = @import("Renderer/TextureTable.zig");
 
+pub const TextureData = TexturePool.Data;
 pub const TextureHandle = TexturePool.Handle;
 pub const UiVertex = FrameData.UiVertex;
 pub const max_ui_quads = FrameData.max_ui_quads;
@@ -747,7 +748,7 @@ pub fn updateShaders(self: *Renderer, io: std.Io) !void {
     std.log.info("reloaded shaders", .{});
 }
 
-pub fn uploadTexture(self: *Renderer, replace: ?TexturePool.Handle, info: TexturePool.Info) !TexturePool.Handle {
+pub fn uploadTexture(self: *Renderer, replace: ?TexturePool.Handle, info: TexturePool.Data) !TexturePool.Handle {
     if (replace) |handle| self.texture_table.retire(handle, self.frame_index);
     return try self.texture_table.alloc(self.device, self.physical_device, info);
 }

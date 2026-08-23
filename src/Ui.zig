@@ -33,9 +33,19 @@ pub fn key(name: []const u8) u64 {
     return std.hash.Wyhash.hash(0, name);
 }
 
-pub fn rect(self: *const Ui, name: []const u8) ?Rect {
-    const i = self.names.get(key(name)) orelse return null;
+pub fn rect(self: *const Ui, name: []const u8) Rect {
+    const i = self.names.get(key(name)) orelse return .{
+        .left = 0,
+        .top = 0,
+        .width = 0,
+        .height = 0,
+    };
     return self.nodes.items[i].rect;
+}
+
+pub fn nodeRef(self: *const Ui, name: []const u8) ?*Node {
+    const i = self.names.get(key(name)) orelse return null;
+    return &self.nodes.items[i];
 }
 
 pub const Quad = struct {
@@ -44,7 +54,7 @@ pub const Quad = struct {
     texture_handle: u32,
 };
 
-const Node = struct {
+pub const Node = struct {
     id: u32,
     layout: Layout,
     name: ?u64,
@@ -529,3 +539,12 @@ fn hoverUpdate(self: *Ui) void {
         }
     }
 }
+
+// pub fn aabb(a: Rect, b: Rect) bool {
+//
+//         if (!(self.mouse_state.position.left < node.rect.left or
+//             self.mouse_state.position.top < node.rect.top or
+//             self.mouse_state.position.left >= node.rect.left + node.rect.width or
+//             self.mouse_state.position.top >= node.rect.top + node.rect.height))
+//         {
+// }

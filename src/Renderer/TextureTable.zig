@@ -25,12 +25,12 @@ const State = union(enum) {
     used,
     retired: usize,
 };
-pub const Info = struct {
-    data: []const u8,
+
+pub const Data = struct {
     width: u32,
     height: u32,
+    bytes: []const u8,
 };
-
 pub fn init(self: *TexturePool, device: Device, physical_device: PhysicalDevice, texture_layout: DescriptorLayout) !void {
     for (0..self.table.len) |i| self.table[i].state = .unused;
 
@@ -67,7 +67,7 @@ pub fn init(self: *TexturePool, device: Device, physical_device: PhysicalDevice,
     _ = try self.alloc(device, physical_device, .{
         .width = 1,
         .height = 1,
-        .data = &.{ 255, 255, 255, 255 },
+        .bytes = &.{ 255, 255, 255, 255 },
     });
 }
 
@@ -86,7 +86,7 @@ pub fn reclaim(self: *TexturePool, device: Device, current_frame: usize) void {
     };
 }
 
-pub fn alloc(self: *TexturePool, device: Device, physical_device: PhysicalDevice, info: Info) !Handle {
+pub fn alloc(self: *TexturePool, device: Device, physical_device: PhysicalDevice, data: Data) !Handle {
     const handle: Handle = for (0..self.table.len) |i| {
         if (self.table[i].state == .unused) break @enumFromInt(i);
     } else return error.Full;
@@ -94,14 +94,14 @@ pub fn alloc(self: *TexturePool, device: Device, physical_device: PhysicalDevice
         device,
         physical_device,
         vk.Format.r8g8b8a8_unorm,
-        .{ .width = info.width, .height = info.height },
+        .{ .width = data.width, .height = data.height },
         .{ .transfer_dst_bit = true, .color_attachment_bit = true, .sampled_bit = true },
         .{ .color_bit = true },
     );
     try new_image.uploadData(
         device,
         physical_device,
-        info.data,
+        data.bytes,
     );
     var image_info: vk.DescriptorImageInfo = .{
         .sampler = self.default_sampler,

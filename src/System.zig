@@ -5,33 +5,19 @@ const Window = @import("Window.zig");
 const Renderer = @import("Renderer.zig");
 const Capture = @import("Capture.zig");
 const Editor = @import("Editor.zig");
-
-const playspeed: u32 = 60;
+const Clip = Editor.Clip;
+const Info = Editor.Clip.Info;
 
 gpa: std.mem.Allocator,
 io: std.Io,
 renderer: Renderer,
 editor: Editor,
-clip: Clip,
-display_handle: Renderer.TextureHandle,
-playing: bool,
-
-pub const Info = struct { width: u32, height: u32, fps_num: u32, fps_den: u32 };
-pub const Clip = struct {
-    info: Info,
-    frames: std.ArrayList([]u8), // each info.width*info.height*4 bytes, RGBA
-    index: usize,
-    previous_index: usize,
-
-    counter: usize,
-    orderd: std.ArrayList(u32),
-};
 
 fn init(self: *System, gpa: std.mem.Allocator, io: std.Io, window: *Window) !void {
     self.gpa = gpa;
     self.io = io;
     try self.renderer.init(gpa, io, window);
-    self.editor = try Editor.init(gpa, window);
+    try Editor.init(&self.editor, gpa, window);
 
     var recording = Capture.startRecording(gpa, io, "/tmp/test.mp4") catch return;
     std.debug.print("recording... press enter to stop\n", .{});
@@ -41,61 +27,26 @@ fn init(self: *System, gpa: std.mem.Allocator, io: std.Io, window: *Window) !voi
     const path = try recording.stop(io);
     std.debug.print("saved: {s}\n", .{path});
 
-    self.clip = try load(gpa, io, "/tmp/test.mp4");
+    self.editor.clip = try load(gpa, io, "/tmp/test.mp4");
 
-    std.debug.print("{} frames, {}x{}\n", .{ self.clip.frames.items.len, self.clip.info.width, self.clip.info.height });
-    self.display_handle = try self.renderer.uploadTexture(null, .{
-        .height = self.clip.info.height,
-        .width = self.clip.info.width,
-        .data = self.clip.frames.items[0],
-    });
-    self.playing = false;
+    // std.debug.print("{} frames, {}x{}\n", .{ self.clip.frames.items.len, self.clip.info.width, self.clip.info.height });
+    self.editor.display_handle = try self.renderer.uploadTexture(null, self.editor.getFrameData());
 }
 
 fn deinit(self: *System) void {
     self.editor.deinit(self.gpa);
     self.renderer.deinit();
-    for (self.clip.frames.items) |frame| self.gpa.free(frame);
-    self.clip.frames.deinit(self.gpa);
-    self.clip.orderd.deinit(self.gpa);
 }
 
 fn update(self: *System, window: *Window) !void {
-    if (self.playing) {
-        self.clip.counter += 1;
-    }
-    const virtual_index = self.clip.counter / playspeed % self.clip.orderd.items.len;
-    self.clip.index = self.clip.orderd.items[virtual_index];
-    if (self.clip.previous_index != self.clip.index) {
-        self.display_handle = try self.renderer.uploadTexture(self.display_handle, .{
-            .height = self.clip.info.height,
-            .width = self.clip.info.width,
-            .data = self.clip.frames.items[self.clip.index],
-        });
-        self.clip.previous_index = self.clip.index;
-    }
     try self.renderer.updateShaders(self.io);
     try self.renderer.resize(window.size);
     try self.renderer.begin(window.size, .{ .clear_color = .{ 0.0, 0.0, 0.0, 1.0 } });
 
-    const output = self.editor.update(
-        window,
-        .{
-            .display = self.display_handle,
-            .playhead = @as(f32, @floatFromInt(virtual_index)) / @as(f32, @floatFromInt(self.clip.orderd.items.len)),
-        },
-    );
+    const output = try self.editor.update(window);
     // std.log.debug("{d} : {d}", .{ virtual_index, self.clip.orderd.items.len });
-    switch (output.action) {
-        .playhead => |new_playhead| self.clip.counter = @as(usize, @intFromFloat(new_playhead * @as(f32, @floatFromInt(self.clip.orderd.items.len)))) * playspeed,
-        .toggle => self.playing = !self.playing,
-        .trim_from_start => try self.clip.orderd.replaceRange(self.gpa, 0, virtual_index, &.{}),
-        .trim_from_end => {
-            std.log.debug("happend {d} : {d}", .{ virtual_index, self.clip.orderd.items.len });
-
-            try self.clip.orderd.replaceRange(self.gpa, virtual_index, self.clip.orderd.items.len - virtual_index, &.{});
-        },
-        .none => {},
+    if (output.frame_changed) {
+        self.editor.display_handle = try self.renderer.uploadTexture(self.editor.display_handle, self.editor.getFrameData());
     }
 
     try self.renderer.draw(.{

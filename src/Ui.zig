@@ -80,6 +80,13 @@ pub const Rect = struct {
     top: f32,
     width: f32,
     height: f32,
+
+    pub fn contains(self: Rect, position: Position2D) bool {
+        return (!(position.left < self.left or
+            position.top < self.top or
+            position.left >= self.left + self.width or
+            position.top >= self.top + self.height));
+    }
 };
 
 const Animation = struct {
@@ -524,11 +531,7 @@ fn hoverUpdate(self: *Ui) void {
         i -= 1;
         const node = self.nodes.items[i];
         const name = node.name orelse continue;
-        if (!(self.mouse_state.position.left < node.rect.left or
-            self.mouse_state.position.top < node.rect.top or
-            self.mouse_state.position.left >= node.rect.left + node.rect.width or
-            self.mouse_state.position.top >= node.rect.top + node.rect.height))
-        {
+        if (node.rect.contains(self.mouse_state.position)) {
             self.hover_item = name;
             break;
         }

@@ -19,7 +19,12 @@ box_select: SelectBox,
 pub const SelectBox = struct {
     state: SelectState = .none,
     region: Ui.Rect,
-    frames: struct { first: usize, count: usize } = .{ .first = 0, .count = 0 },
+    frames: FrameRange = .{},
+
+    pub const FrameRange = struct {
+        first: usize = 0,
+        count: usize = 0,
+    };
 
     pub const SelectState = enum {
         none,
@@ -84,7 +89,11 @@ pub fn update(self: *Editor, window: *Window) !Output {
 
     if (window.keyboard.get(.space) == .press) self.playing = !self.playing;
     if (window.keyboard.get(.c) == .press) try clip.orderd.replaceRange(self.gpa, 0, virtual_index, &.{});
-    if (window.keyboard.get(.d) == .press) try self.clip.orderd.replaceRange(self.gpa, virtual_index, clip.orderd.items.len - virtual_index, &.{});
+    if (window.keyboard.get(.d) == .press) try clip.orderd.replaceRange(self.gpa, virtual_index, clip.orderd.items.len - virtual_index, &.{});
+    if (window.keyboard.get(.x) == .press) {
+        try clip.orderd.replaceRange(self.gpa, self.box_select.frames.first, self.box_select.frames.count, &.{});
+        self.box_select.frames = .{};
+    }
 
     return .{ .ui_vertices = self.vertices.items, .frame_changed = frame_changed };
 }
@@ -159,6 +168,13 @@ fn constructUi(self: *Editor, window: *Window, ui: *Ui) void {
             .color = if (is_selected) .new(0, 0, 1, 0.5) else .new(1, 0.5, 0.5, 0.5),
         });
     }
+    if (self.box_select.state == .selecting) {
+        ui.add(null, .{
+            .offset = .{ .left = region.left, .top = region.top },
+            .size = .{ .fixed = .{ .width = region.width, .height = region.height } },
+            .color = .new(0.1, 0.3, 1, 0.5),
+        });
+    }
 
     ui.add("timeline", .{ .size = .{
         .percent = .{ .width = clip.playhead(), .height = 0 },
@@ -169,14 +185,6 @@ fn constructUi(self: *Editor, window: *Window, ui: *Ui) void {
         .color = if (ui.isHovered("playhead")) .new(1, 1, 1, 1) else .new(1, 1, 1, 0.5),
         // .offset = .{ .left = ui.rect("timeline").left * clip.playhead(), .top = 0 },
     });
-
-    if (self.box_select.state == .selecting) {
-        ui.add(null, .{
-            .offset = .{ .left = region.left, .top = region.top },
-            .size = .{ .fixed = .{ .width = region.width, .height = region.height } },
-            .color = .new(0.1, 0.3, 1, 0.5),
-        });
-    }
 
     ui.end();
 }
@@ -190,17 +198,19 @@ fn interactUi(self: *Editor, window: *Window, ui: *Ui) void {
         const tl = ui.rect("timeline");
         const new_playhead = std.math.clamp((ui.mouse_state.position.left - tl.left) / tl.width, 0, 1);
         clip.counter = @as(usize, @intFromFloat(new_playhead * @as(f32, @floatFromInt(clip.orderd.items.len)))) * playspeed;
-    } else if (pointer.buttons.left) {
+    }
+    const timeline_rect = ui.rect("timeline");
+    const mouse_position = ui.mouse_state.position;
+    if (pointer.buttons.right and timeline_rect.contains(mouse_position)) {
         if (box_select.state == .none) {
             box_select.state = .selecting;
-            box_select.region.left = @floatCast(pointer.movement.position.x);
-            box_select.region.top = @floatCast(pointer.movement.position.y);
+            box_select.region.left = mouse_position.left;
+            box_select.region.top = mouse_position.top;
         } else {
             const region = &box_select.region;
             region.width = @as(f32, @floatCast(pointer.movement.position.x)) - region.left;
             region.height = @as(f32, @floatCast(pointer.movement.position.y)) - region.top;
 
-            const timeline_rect = ui.rect("timeline");
             const frame_count: f32 = @floatFromInt(clip.orderd.items.len);
             const box_left = @min(region.left, region.left + region.width);
             const box_right = @max(region.left, region.left + region.width);

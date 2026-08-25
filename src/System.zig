@@ -13,6 +13,8 @@ io: std.Io,
 renderer: Renderer,
 editor: Editor,
 
+//TODO: ffmpeg package for zig, queues instead fo arrays? or indecies?
+
 fn init(self: *System, gpa: std.mem.Allocator, io: std.Io, window: *Window) !void {
     self.gpa = gpa;
     self.io = io;

@@ -94,6 +94,15 @@ pub fn update(self: *Editor, window: *Window) !Output {
         try clip.orderd.replaceRange(self.gpa, self.box_select.frames.first, self.box_select.frames.count, &.{});
         self.box_select.frames = .{};
     }
+    if (window.keyboard.get(.i) == .press) {
+        var new_orderd: std.ArrayList(u32) = try .initCapacity(self.gpa, clip.orderd.items.len / 2);
+        for (0..clip.orderd.items.len) |i| {
+            if (i % 2 == 0) continue;
+            new_orderd.appendAssumeCapacity(clip.orderd.items[i]);
+        }
+        clip.orderd.deinit(self.gpa);
+        clip.orderd = new_orderd;
+    }
     return .{
         .ui_vertices = self.vertices.items,
         .frame_changed = frame_changed,

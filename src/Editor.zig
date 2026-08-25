@@ -70,6 +70,7 @@ pub fn deinit(self: *Editor, gpa: std.mem.Allocator) void {
 pub const Output = struct {
     ui_vertices: []const Renderer.UiVertex,
     frame_changed: bool = false,
+    request_export: bool = false,
 };
 pub fn update(self: *Editor, window: *Window) !Output {
     const clip = &self.clip;
@@ -94,8 +95,11 @@ pub fn update(self: *Editor, window: *Window) !Output {
         try clip.orderd.replaceRange(self.gpa, self.box_select.frames.first, self.box_select.frames.count, &.{});
         self.box_select.frames = .{};
     }
-
-    return .{ .ui_vertices = self.vertices.items, .frame_changed = frame_changed };
+    return .{
+        .ui_vertices = self.vertices.items,
+        .frame_changed = frame_changed,
+        .request_export = window.keyboard.get(.e) == .press,
+    };
 }
 
 fn constructUi(self: *Editor, window: *Window, ui: *Ui) void {

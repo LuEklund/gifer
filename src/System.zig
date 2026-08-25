@@ -57,6 +57,8 @@ fn update(self: *System, window: *Window) !void {
         .ui_vertices = output.ui_vertices,
     });
     try self.renderer.submit();
+
+    if (output.request_export) try exportClip(self.io, self.editor.clip);
 }
 
 pub fn load(gpa: std.mem.Allocator, io: std.Io, path: []const u8) !Clip {
@@ -121,6 +123,37 @@ fn probe(gpa: std.mem.Allocator, io: std.Io, path: []const u8) !Info {
         .fps_num = try std.fmt.parseInt(u32, it.next() orelse return error.BadProbe, 10),
         .fps_den = try std.fmt.parseInt(u32, it.next() orelse return error.BadProbe, 10),
     };
+}
+
+fn exportClip(io: std.Io, clip: Clip) !void {
+    std.log.debug("export START", .{});
+    var size_buf: [256]u8 = undefined;
+    const size = try std.fmt.bufPrint(&size_buf, "{d}x{d}", .{ clip.info.width, clip.info.height });
+    var fps_buf: [256]u8 = undefined;
+    const fps = try std.fmt.bufPrint(&fps_buf, "{d}/{d}", .{ clip.info.fps_num, clip.info.fps_den });
+    var child = try std.process.spawn(io, .{
+        .stdin = .pipe,
+        .argv = &.{
+            "ffmpeg", "-v",       "error",
+            "-f",     "rawvideo", "-pix_fmt",
+            "rgba",   "-s",       size,
+            "-r",     fps,        "-i",
+            "pipe:0", "-y",       "/tmp/out.gif",
+        },
+    });
+    var buf: [2048]u8 = undefined;
+    var writer = child.stdin.?.writer(io, &buf);
+    for (clip.orderd.items) |frame_index| {
+        try writer.interface.writeAll(clip.frames.items[frame_index]);
+    }
+    std.log.debug("export end", .{});
+    child.stdin.?.close(io);
+    child.stdin = null;
+    std.log.debug("export end", .{});
+    try writer.flush();
+    std.log.debug("export end", .{});
+    _ = try child.wait(io);
+    std.log.debug("export end", .{});
 }
 
 //Hot reload stuff

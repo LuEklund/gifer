@@ -6,8 +6,6 @@ const Renderer = @import("Renderer.zig");
 const Ui = @import("Ui.zig");
 const TextureData = Renderer.TextureData;
 
-const playspeed: u32 = 60;
-
 gpa: std.mem.Allocator,
 ui: Ui,
 vertices: std.ArrayList(Renderer.UiVertex) = .empty,
@@ -44,7 +42,8 @@ pub const Clip = struct {
     pub const Info = struct { width: u32, height: u32, fps_num: u32, fps_den: u32 };
 
     pub fn virtualIndex(self: *Clip) usize {
-        return self.counter / playspeed % self.orderd.items.len;
+        const info = self.info;
+        return self.counter / (info.fps_num / info.fps_den) % self.orderd.items.len;
     }
     pub fn playhead(self: *Clip) f32 {
         const virtual_index = self.virtualIndex();
@@ -200,8 +199,9 @@ fn interactUi(self: *Editor, window: *Window, ui: *Ui) void {
 
     if (ui.isDragging("timeline") or ui.isDragging("playhead")) {
         const tl = ui.rect("timeline");
+        const info = clip.info;
         const new_playhead = std.math.clamp((ui.mouse_state.position.left - tl.left) / tl.width, 0, 1);
-        clip.counter = @as(usize, @intFromFloat(new_playhead * @as(f32, @floatFromInt(clip.orderd.items.len)))) * playspeed;
+        clip.counter = @as(usize, @intFromFloat(new_playhead * @as(f32, @floatFromInt(clip.orderd.items.len)))) * (info.fps_num / info.fps_den);
     }
     const timeline_rect = ui.rect("timeline");
     const mouse_position = ui.mouse_state.position;

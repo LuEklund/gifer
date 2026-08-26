@@ -42,7 +42,6 @@ fn deinit(self: *System) void {
 
 fn update(self: *System, window: *Window) !void {
     try self.renderer.updateShaders(self.io);
-    try self.renderer.resize(window.size);
     try self.renderer.begin(window.size, .{ .clear_color = .{ 0.0, 0.0, 0.0, 1.0 } });
 
     const output = try self.editor.update(window);
@@ -148,12 +147,9 @@ fn exportClip(io: std.Io, clip: Clip) !void {
     for (clip.orderd.items) |frame_index| {
         try writer.interface.writeAll(clip.frames.items[frame_index]);
     }
-    std.log.debug("export end", .{});
+    try writer.flush();
     child.stdin.?.close(io);
     child.stdin = null;
-    std.log.debug("export end", .{});
-    try writer.flush();
-    std.log.debug("export end", .{});
     _ = try child.wait(io);
     std.log.debug("export end", .{});
 }

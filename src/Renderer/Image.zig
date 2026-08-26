@@ -126,7 +126,6 @@ pub fn uploadData(self: *Image, device: Device, physical_device: PhysicalDevice,
     );
     try staging.upload(data);
     defer staging.deinit(device);
-    errdefer staging.deinit(device);
 
     const cmd = try device.beginImmediate();
 

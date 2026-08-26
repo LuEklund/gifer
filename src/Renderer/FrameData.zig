@@ -27,6 +27,12 @@ pub const PushConstant = extern struct {
     window_size: [2]f32,
 };
 
+pub fn deinit(self: *FrameData, device: Device) void {
+    device.proxy.destroySemaphore(self.image_available, null);
+    device.proxy.destroyFence(self.in_flight_fence, null);
+    self.ui_verecies.deinit(device);
+}
+
 pub fn init(self: *FrameData, physical_device: PhysicalDevice, device: Device) !void {
     const create_info: *const vk.CommandBufferAllocateInfo = &.{
         .command_pool = device.command_pool,

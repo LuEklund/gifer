@@ -74,6 +74,8 @@ pub fn init(self: *TexturePool, device: Device, physical_device: PhysicalDevice,
 pub fn deinit(self: *TexturePool, device: Device) void {
     for (0..self.table.len) |handle| if (self.table[handle].state != .unused)
         self.table[handle].image.deinit(device);
+    self.descriptor_buffer.deinit(device);
+    device.proxy.destroySampler(self.default_sampler, null);
 }
 
 pub fn reclaim(self: *TexturePool, device: Device, current_frame: usize) void {

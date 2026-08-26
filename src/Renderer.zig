@@ -238,10 +238,12 @@ pub fn deinit(self: *Renderer) void {
     device.proxy.deviceWaitIdle() catch unreachable;
 
     self.texture_table.deinit(device);
-    for (&self.frames) |*frame| {
-        device.proxy.destroySemaphore(frame.image_available, null);
-        device.proxy.destroyFence(frame.in_flight_fence, null);
-    }
+    for (&self.frames) |*frame| frame.deinit(device);
+    self.shader_obj_vert.deinit(device);
+    self.shader_obj_frag.deinit(device);
+    self.pipeline_layout.deinit(device);
+    self.desc_layout.deinit(device);
+    self.ui_index.deinit(device);
     self.swapchain.deinit(gpa, device);
     device.deinit(gpa);
     self.surface.deinit(instance);

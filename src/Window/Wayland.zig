@@ -183,6 +183,7 @@ pub fn close(self: *Wayland, window: *Window) void {
     if (self.keyboard) |keyboard| keyboard.destroy();
     if (self.xkb.state) |state| state.unref();
     if (self.xkb.keymap) |keymap| keymap.unref();
+    if (self.xkb.keymap_data.len != 0) std.posix.munmap(self.xkb.keymap_data);
     self.xkb.context.unref();
 
     if (self.toplevel_icon) |toplevel_icon| {
@@ -195,7 +196,6 @@ pub fn close(self: *Wayland, window: *Window) void {
         .confined => |constraint| if (constraint) |confined| confined.destroy(),
         .locked => |constraint| if (constraint) |locked| locked.destroy(),
     }
-    if (self.cursor_shape_device) |cursor_shape_device| cursor_shape_device.destroy();
     if (self.toplevel_decoration) |toplevel_decoration| toplevel_decoration.destroy();
     self.toplevel.destroy();
     self.xdg_surface.destroy();

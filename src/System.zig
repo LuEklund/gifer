@@ -32,8 +32,8 @@ fn init(self: *System, desc: InitDescription) !void {
     var buf: [8]u8 = undefined;
     _ = try std.Io.File.stdin().readStreaming(io, &.{&buf});
 
-    const path = try recording.stop(io);
-    std.debug.print("saved: {s}\n", .{path});
+    try recording.stop(io);
+    std.debug.print("saved: {s}\n", .{record_path});
 
     const info = try probe(gpa, io, record_path);
 
@@ -88,7 +88,7 @@ fn update(self: *System, window: *Window) !void {
 
     const output = try self.editor.update(window, &self.clip, self.display orelse .blank);
     if (output.frame_changed) {
-        self.display = try self.renderer.uploadTexture(self.display, self.editor.getFrameData(&self.clip));
+        self.display = try self.renderer.uploadTexture(self.display, self.clip.frameData(output.display_index));
     }
 
     try self.renderer.draw(.{

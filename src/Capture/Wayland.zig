@@ -3,12 +3,10 @@ const std = @import("std");
 
 pub const Recording = struct {
     child: std.process.Child,
-    path: []const u8,
 
-    pub fn stop(self: *Recording, io: std.Io) ![]const u8 {
+    pub fn stop(self: *Recording, io: std.Io) !void {
         try std.posix.kill(self.child.id.?, std.posix.SIG.INT);
         _ = try self.child.wait(io);
-        return self.path; // the mp4, ready to import
     }
 };
 
@@ -19,7 +17,7 @@ pub fn startRecording(gpa: std.mem.Allocator, io: std.Io, path: []const u8) !Rec
     const child = try std.process.spawn(io, .{
         .argv = &.{ "wf-recorder", "-g", std.mem.trim(u8, geometry, "\n"), "-y", "-f", path },
     });
-    return .{ .child = child, .path = path };
+    return .{ .child = child };
 }
 
 pub fn stop(io: std.Io, recording: *Recording) void {

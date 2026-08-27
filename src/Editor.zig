@@ -10,7 +10,7 @@ gpa: std.mem.Allocator,
 ui: Ui,
 vertices: std.ArrayList(Renderer.UiVertex) = .empty,
 playing: bool = false,
-index: usize = 0,
+display_index: usize = 0,
 previous_index: usize = std.math.maxInt(usize),
 counter: usize = 0,
 box_select: SelectBox,
@@ -47,6 +47,14 @@ pub const Clip = struct {
     pub fn frameSize(clip: *const Clip) usize {
         return clip.info.width * clip.info.height * 4;
     }
+
+    pub fn frameData(clip: *const Clip, frame: usize) TextureData {
+        return .{
+            .height = clip.info.height,
+            .width = clip.info.width,
+            .bytes = clip.memory[frame * clip.frameSize() ..][0..clip.frameSize()],
+        };
+    }
 };
 
 fn virtualIndex(self: *const Editor, clip: *const Clip) usize {
@@ -70,12 +78,14 @@ pub fn deinit(self: *Editor, gpa: std.mem.Allocator) void {
 
 pub const Output = struct {
     ui_vertices: []const Renderer.UiVertex,
+    display_index: usize = 0,
     frame_changed: bool = false,
     request_export: bool = false,
 };
 pub fn update(self: *Editor, window: *Window, clip: *Clip, display: Renderer.TextureHandle) !Output {
     const ui = &self.ui;
     if (self.playing) {
+        // std.log.debug("play", .{});
         self.counter += 1;
     }
 
@@ -84,9 +94,10 @@ pub fn update(self: *Editor, window: *Window, clip: *Clip, display: Renderer.Tex
     var frame_changed = false;
     if (clip.orderd.items.len != 0) {
         virtual_index = self.virtualIndex(clip);
-        self.index = clip.orderd.items[virtual_index];
+        self.display_index = clip.orderd.items[virtual_index];
         playhead_frac = @as(f32, @floatFromInt(virtual_index)) / @as(f32, @floatFromInt(clip.orderd.items.len));
-        frame_changed = self.previous_index != self.index;
+        frame_changed = self.previous_index != self.display_index;
+        self.previous_index = self.display_index;
     }
 
     self.constructUi(window, &self.ui, clip, playhead_frac, display);
@@ -113,6 +124,7 @@ pub fn update(self: *Editor, window: *Window, clip: *Clip, display: Renderer.Tex
     }
     return .{
         .ui_vertices = self.vertices.items,
+        .display_index = self.display_index,
         .frame_changed = frame_changed,
         .request_export = window.keyboard.get(.e) == .press,
     };
@@ -177,7 +189,7 @@ fn constructUi(self: *Editor, window: *Window, ui: *Ui, clip: *const Clip, playh
         .floating = true,
     });
 
-    const quad_budget = 200;
+    const quad_budget = 20;
     const len = clip.orderd.items.len;
     const frames_per_quad = @max(1, std.math.divCeil(usize, len, quad_budget) catch unreachable);
     const quad_count = std.math.divCeil(usize, len, frames_per_quad) catch unreachable;
@@ -306,13 +318,4 @@ fn make(quads: std.ArrayList(Ui.Quad), vertices: *std.ArrayList(Renderer.UiVerte
         //     }
         // }
     }
-}
-
-pub fn getFrameData(self: *Editor, clip: *const Clip) TextureData {
-    self.previous_index = self.index;
-    return .{
-        .height = clip.info.height,
-        .width = clip.info.width,
-        .bytes = clip.memory[self.index * clip.frameSize() ..][0..clip.frameSize()],
-    };
 }

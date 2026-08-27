@@ -15,20 +15,19 @@ editor: Editor,
 clip: Clip,
 clip_file: std.Io.File,
 clip_map: std.Io.File.MemoryMap,
+decode: std.process.Child,
+frames_decoded: usize,
+display: ?Renderer.TextureHandle,
 cache_dir: std.Io.Dir,
 
 fn init(self: *System, desc: InitDescription) !void {
     const gpa = desc.gpa.*;
     const io = desc.io.*;
     const window = desc.window;
-    self.gpa = gpa;
-    self.io = io;
-    self.cache_dir = desc.cache_dir.*;
-    try self.renderer.init(gpa, io, window);
-    try Editor.init(&self.editor, gpa, window);
+    const cache_dir = desc.cache_dir.*;
 
     const record_path = "/tmp/test.mp4";
-    var recording = Capture.startRecording(gpa, io, record_path) catch return;
+    var recording = try Capture.startRecording(gpa, io, record_path);
     std.debug.print("recording... press enter to stop\n", .{});
     var buf: [8]u8 = undefined;
     _ = try std.Io.File.stdin().readStreaming(io, &.{&buf});
@@ -36,11 +35,38 @@ fn init(self: *System, desc: InitDescription) !void {
     const path = try recording.stop(io);
     std.debug.print("saved: {s}\n", .{path});
 
-    const loaded = try load(gpa, io, self.cache_dir, record_path);
-    self.clip = loaded.clip;
-    self.clip_file = loaded.file;
-    self.clip_map = loaded.map;
-    self.editor.display_handle = try self.renderer.uploadTexture(null, self.editor.getFrameData(&self.clip));
+    const info = try probe(gpa, io, record_path);
+
+    const clip_file = try cache_dir.createFile(io, "clip.raw", .{ .read = true, .truncate = true });
+    cache_dir.deleteFile(io, "clip.raw") catch {};
+
+    const decode = try startDecode(io, clip_file, record_path);
+
+    const clip_map = try clip_file.createMemoryMap(io, .{
+        .len = @as(usize, info.frame_count) * info.width * info.height * 4,
+        .protection = .{ .read = true, .write = false },
+        .populate = false,
+    });
+
+    self.* = .{
+        .gpa = gpa,
+        .io = io,
+        .renderer = undefined,
+        .editor = undefined,
+        .clip = .{
+            .info = info,
+            .memory = clip_map.memory,
+            .orderd = try .initCapacity(gpa, info.frame_count),
+        },
+        .clip_file = clip_file,
+        .clip_map = clip_map,
+        .decode = decode,
+        .frames_decoded = 0,
+        .display = null,
+        .cache_dir = cache_dir,
+    };
+    try self.renderer.init(gpa, io, window);
+    try self.editor.init(gpa, window);
 }
 
 fn deinit(self: *System) void {
@@ -52,12 +78,17 @@ fn deinit(self: *System) void {
 }
 
 fn update(self: *System, window: *Window) !void {
+    const ready: usize = @intCast(try self.clip_file.length(self.io) / self.clip.frameSize());
+    const capped = @min(ready, self.clip.info.frame_count);
+    while (self.frames_decoded < capped) : (self.frames_decoded += 1)
+        self.clip.orderd.appendAssumeCapacity(@intCast(self.frames_decoded));
+
     try self.renderer.updateShaders(self.io);
     try self.renderer.begin(window.size, .{ .clear_color = .{ 0.0, 0.0, 0.0, 1.0 } });
 
-    const output = try self.editor.update(window, &self.clip);
+    const output = try self.editor.update(window, &self.clip, self.display orelse .blank);
     if (output.frame_changed) {
-        self.editor.display_handle = try self.renderer.uploadTexture(self.editor.display_handle, self.editor.getFrameData(&self.clip));
+        self.display = try self.renderer.uploadTexture(self.display, self.editor.getFrameData(&self.clip));
     }
 
     try self.renderer.draw(.{
@@ -72,14 +103,8 @@ fn update(self: *System, window: *Window) !void {
     if (output.request_export) try exportClip(self.io, &self.clip);
 }
 
-pub const Loaded = struct { clip: Clip, file: std.Io.File, map: std.Io.File.MemoryMap };
-pub fn load(gpa: std.mem.Allocator, io: std.Io, cache_dir: std.Io.Dir, src_path: []const u8) !Loaded {
-    const info = try probe(gpa, io, src_path);
-
-    const file = try cache_dir.createFile(io, "clip.raw", .{ .read = true, .truncate = true });
-    cache_dir.deleteFile(io, "clip.raw") catch {};
-
-    var child = try std.process.spawn(io, .{
+fn startDecode(io: std.Io, file: std.Io.File, src_path: []const u8) !std.process.Child {
+    return std.process.spawn(io, .{
         .argv = &.{
             "ffmpeg",   "-v",       "error",
             "-i",       src_path,   "-f",
@@ -88,39 +113,14 @@ pub fn load(gpa: std.mem.Allocator, io: std.Io, cache_dir: std.Io.Dir, src_path:
         },
         .stdout = .{ .file = file },
     });
-
-    _ = try child.wait(io);
-    const frame_len: usize = info.width * info.height * 4;
-    const total = try file.length(io);
-    if (total % frame_len != 0) return error.TruncatedStream;
-    const count: usize = @intCast(total / frame_len);
-
-    const map = try file.createMemoryMap(io, .{
-        .len = @intCast(total),
-        .protection = .{ .read = true, .write = false },
-        .populate = false,
-    });
-
-    var ordered: std.ArrayList(u32) = try .initCapacity(gpa, count);
-    for (0..count) |i| ordered.appendAssumeCapacity(@intCast(i));
-
-    return .{
-        .clip = .{
-            .info = info,
-            .memory = map.memory,
-            .orderd = ordered,
-        },
-        .file = file,
-        .map = map,
-    };
 }
 
 fn probe(gpa: std.mem.Allocator, io: std.Io, path: []const u8) !Info {
     const result = try std.process.run(gpa, io, .{
         .argv = &.{
-            "ffprobe",                          "-v",  "error",
-            "-select_streams",                  "v:0", "-show_entries",
-            "stream=width,height,r_frame_rate", "-of", "csv=p=0",
+            "ffprobe",                                    "-v",  "error",
+            "-select_streams",                            "v:0", "-show_entries",
+            "stream=width,height,r_frame_rate,nb_frames", "-of", "csv=p=0",
             path,
         },
     });
@@ -128,10 +128,11 @@ fn probe(gpa: std.mem.Allocator, io: std.Io, path: []const u8) !Info {
     defer gpa.free(result.stderr);
     var it = std.mem.tokenizeAny(u8, std.mem.trim(u8, result.stdout, "\n"), ",/");
     return .{
-        .width = try std.fmt.parseInt(u32, it.next() orelse return error.BadProbe, 10),
-        .height = try std.fmt.parseInt(u32, it.next() orelse return error.BadProbe, 10),
-        .fps_num = try std.fmt.parseInt(u32, it.next() orelse return error.BadProbe, 10),
-        .fps_den = try std.fmt.parseInt(u32, it.next() orelse return error.BadProbe, 10),
+        .width = try std.fmt.parseInt(u32, it.next() orelse return error.BadProbeWidth, 10),
+        .height = try std.fmt.parseInt(u32, it.next() orelse return error.BadProbeHeight, 10),
+        .fps_num = try std.fmt.parseInt(u32, it.next() orelse return error.BadProbeFpsNum, 10),
+        .fps_den = try std.fmt.parseInt(u32, it.next() orelse return error.BadProbeFpsDen, 10),
+        .frame_count = try std.fmt.parseInt(u32, it.next() orelse return error.BadProbeFrameCount, 10),
     };
 }
 

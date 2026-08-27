@@ -11,9 +11,8 @@ ui: Ui,
 vertices: std.ArrayList(Renderer.UiVertex) = .empty,
 playing: bool = false,
 index: usize = 0,
-previous_index: usize = 0,
+previous_index: usize = std.math.maxInt(usize),
 counter: usize = 0,
-display_handle: Renderer.TextureHandle = .blank,
 box_select: SelectBox,
 
 pub const SelectBox = struct {
@@ -37,7 +36,13 @@ pub const Clip = struct {
     memory: []u8,
     orderd: std.ArrayList(u32),
 
-    pub const Info = struct { width: u32, height: u32, fps_num: u32, fps_den: u32 };
+    pub const Info = struct {
+        width: u32,
+        height: u32,
+        fps_num: u32,
+        fps_den: u32,
+        frame_count: u32,
+    };
 
     pub fn frameSize(clip: *const Clip) usize {
         return clip.info.width * clip.info.height * 4;
@@ -47,11 +52,6 @@ pub const Clip = struct {
 fn virtualIndex(self: *const Editor, clip: *const Clip) usize {
     const info = clip.info;
     return self.counter / (info.fps_num / info.fps_den) % clip.orderd.items.len;
-}
-
-fn playhead(self: *const Editor, clip: *const Clip) f32 {
-    const virtual_index = self.virtualIndex(clip);
-    return @as(f32, @floatFromInt(virtual_index)) / @as(f32, @floatFromInt(clip.orderd.items.len));
 }
 
 pub fn init(self: *Editor, gpa: std.mem.Allocator, window: *Window) !void {
@@ -73,16 +73,23 @@ pub const Output = struct {
     frame_changed: bool = false,
     request_export: bool = false,
 };
-pub fn update(self: *Editor, window: *Window, clip: *Clip) !Output {
+pub fn update(self: *Editor, window: *Window, clip: *Clip, display: Renderer.TextureHandle) !Output {
     const ui = &self.ui;
     if (self.playing) {
         self.counter += 1;
     }
-    const virtual_index = self.virtualIndex(clip);
-    self.index = clip.orderd.items[virtual_index];
-    const frame_changed = self.previous_index != self.index;
 
-    self.constructUi(window, &self.ui, clip);
+    var virtual_index: usize = 0;
+    var playhead_frac: f32 = 0;
+    var frame_changed = false;
+    if (clip.orderd.items.len != 0) {
+        virtual_index = self.virtualIndex(clip);
+        self.index = clip.orderd.items[virtual_index];
+        playhead_frac = @as(f32, @floatFromInt(virtual_index)) / @as(f32, @floatFromInt(clip.orderd.items.len));
+        frame_changed = self.previous_index != self.index;
+    }
+
+    self.constructUi(window, &self.ui, clip, playhead_frac, display);
     self.interactUi(window, ui, clip);
 
     self.vertices.clearRetainingCapacity();
@@ -111,7 +118,7 @@ pub fn update(self: *Editor, window: *Window, clip: *Clip) !Output {
     };
 }
 
-fn constructUi(self: *Editor, window: *Window, ui: *Ui, clip: *const Clip) void {
+fn constructUi(self: *Editor, window: *Window, ui: *Ui, clip: *const Clip, playhead_frac: f32, display: Renderer.TextureHandle) void {
     const window_ptr = window.pointer;
     const mouse_pos = window_ptr.movement.position;
     // const region = &self.box_select.region;
@@ -139,7 +146,7 @@ fn constructUi(self: *Editor, window: *Window, ui: *Ui, clip: *const Clip) void 
     ui.add("display", .{
         .size = .{ .percent = .{ .width = 1, .height = 0.5 } },
         .color = .new(1, 1, 1, 1),
-        .texture = @intFromEnum(self.display_handle),
+        .texture = @intFromEnum(display),
     });
 
     const timeline_h: f32 = 0.15;
@@ -172,7 +179,7 @@ fn constructUi(self: *Editor, window: *Window, ui: *Ui, clip: *const Clip) void 
 
     const quad_budget = 200;
     const len = clip.orderd.items.len;
-    const frames_per_quad = std.math.divCeil(usize, len, quad_budget) catch unreachable;
+    const frames_per_quad = @max(1, std.math.divCeil(usize, len, quad_budget) catch unreachable);
     const quad_count = std.math.divCeil(usize, len, frames_per_quad) catch unreachable;
     const slice_width = 1 / @as(f32, @floatFromInt(quad_count));
     const selected = self.box_select.frames;
@@ -193,7 +200,7 @@ fn constructUi(self: *Editor, window: *Window, ui: *Ui, clip: *const Clip) void 
     // }
 
     ui.add("timeline", .{ .size = .{
-        .percent = .{ .width = self.playhead(clip), .height = 0 },
+        .percent = .{ .width = playhead_frac, .height = 0 },
     } });
     ui.add("timeline", .{
         .name = "playhead",

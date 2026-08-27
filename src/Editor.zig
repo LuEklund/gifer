@@ -114,7 +114,7 @@ pub fn update(self: *Editor, window: *Window, clip: *Clip) !Output {
 fn constructUi(self: *Editor, window: *Window, ui: *Ui, clip: *const Clip) void {
     const window_ptr = window.pointer;
     const mouse_pos = window_ptr.movement.position;
-    const region = &self.box_select.region;
+    // const region = &self.box_select.region;
 
     ui.start(.{
         .position = .{ .left = @floatCast(mouse_pos.x), .top = @floatCast(mouse_pos.y) },
@@ -170,23 +170,27 @@ fn constructUi(self: *Editor, window: *Window, ui: *Ui, clip: *const Clip) void 
         .floating = true,
     });
 
+    const quad_budget = 200;
     const len = clip.orderd.items.len;
-    const slice_width = 1 / @as(f32, @floatFromInt(len));
+    const frames_per_quad = std.math.divCeil(usize, len, quad_budget) catch unreachable;
+    const quad_count = std.math.divCeil(usize, len, frames_per_quad) catch unreachable;
+    const slice_width = 1 / @as(f32, @floatFromInt(quad_count));
     const selected = self.box_select.frames;
-    for (0..len) |i| {
-        const is_selected = i >= selected.first and i < selected.first + selected.count;
+    for (0..quad_count) |i| {
+        const first_frame = i * frames_per_quad;
+        const is_selected = first_frame >= selected.first and first_frame < selected.first + selected.count;
         ui.add("display_frames", .{
             .size = .{ .percent = .{ .height = 1, .width = slice_width } },
             .color = if (is_selected) .new(0, 0, 1, 0.5) else .new(1, 0.5, 0.5, 0.5),
         });
     }
-    if (self.box_select.state == .selecting) {
-        ui.add(null, .{
-            .offset = .{ .left = region.left, .top = region.top },
-            .size = .{ .fixed = .{ .width = region.width, .height = region.height } },
-            .color = .new(0.1, 0.3, 1, 0.5),
-        });
-    }
+    // if (self.box_select.state == .selecting) {
+    //     ui.add(null, .{
+    //         .offset = .{ .left = region.left, .top = region.top },
+    //         .size = .{ .fixed = .{ .width = region.width, .height = region.height } },
+    //         .color = .new(0.1, 0.3, 1, 0.5),
+    //     });
+    // }
 
     ui.add("timeline", .{ .size = .{
         .percent = .{ .width = self.playhead(clip), .height = 0 },

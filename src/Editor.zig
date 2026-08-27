@@ -9,8 +9,10 @@ const TextureData = Renderer.TextureData;
 gpa: std.mem.Allocator,
 ui: Ui,
 vertices: std.ArrayList(Renderer.UiVertex) = .empty,
-clip: Clip,
 playing: bool = false,
+index: usize = 0,
+previous_index: usize = 0,
+counter: usize = 0,
 display_handle: Renderer.TextureHandle = .blank,
 box_select: SelectBox,
 
@@ -32,38 +34,38 @@ pub const SelectBox = struct {
 
 pub const Clip = struct {
     info: Info,
-    frames: std.ArrayList([]u8), // each info.width*info.height*4 bytes, RGBA
-    index: usize = 0,
-    previous_index: usize = 0,
-
-    counter: usize = 0,
+    memory: []u8,
     orderd: std.ArrayList(u32),
 
     pub const Info = struct { width: u32, height: u32, fps_num: u32, fps_den: u32 };
 
-    pub fn virtualIndex(self: *Clip) usize {
-        const info = self.info;
-        return self.counter / (info.fps_num / info.fps_den) % self.orderd.items.len;
-    }
-    pub fn playhead(self: *Clip) f32 {
-        const virtual_index = self.virtualIndex();
-        return @as(f32, @floatFromInt(virtual_index)) / @as(f32, @floatFromInt(self.orderd.items.len));
+    pub fn frameSize(clip: *const Clip) usize {
+        return clip.info.width * clip.info.height * 4;
     }
 };
 
+fn virtualIndex(self: *const Editor, clip: *const Clip) usize {
+    const info = clip.info;
+    return self.counter / (info.fps_num / info.fps_den) % clip.orderd.items.len;
+}
+
+fn playhead(self: *const Editor, clip: *const Clip) f32 {
+    const virtual_index = self.virtualIndex(clip);
+    return @as(f32, @floatFromInt(virtual_index)) / @as(f32, @floatFromInt(clip.orderd.items.len));
+}
+
 pub fn init(self: *Editor, gpa: std.mem.Allocator, window: *Window) !void {
-    self.ui = try Ui.init(gpa, window.size.width, window.size.height, Renderer.max_ui_quads);
-    self.vertices = try std.ArrayList(Renderer.UiVertex).initCapacity(gpa, Renderer.max_ui_quads * 4);
-    self.gpa = gpa;
-    self.box_select = .{ .region = undefined };
+    self.* = .{
+        .ui = try Ui.init(gpa, window.size.width, window.size.height, Renderer.max_ui_quads),
+        .vertices = try std.ArrayList(Renderer.UiVertex).initCapacity(gpa, Renderer.max_ui_quads * 4),
+        .gpa = gpa,
+        .box_select = .{ .region = undefined },
+    };
 }
 
 pub fn deinit(self: *Editor, gpa: std.mem.Allocator) void {
     self.vertices.deinit(gpa);
     self.ui.deinit(gpa);
-    for (self.clip.frames.items) |frame| gpa.free(frame);
-    self.clip.frames.deinit(gpa);
-    self.clip.orderd.deinit(gpa);
 }
 
 pub const Output = struct {
@@ -71,18 +73,17 @@ pub const Output = struct {
     frame_changed: bool = false,
     request_export: bool = false,
 };
-pub fn update(self: *Editor, window: *Window) !Output {
-    const clip = &self.clip;
+pub fn update(self: *Editor, window: *Window, clip: *Clip) !Output {
     const ui = &self.ui;
     if (self.playing) {
-        self.clip.counter += 1;
+        self.counter += 1;
     }
-    const virtual_index = clip.virtualIndex();
-    self.clip.index = self.clip.orderd.items[virtual_index];
-    const frame_changed = self.clip.previous_index != self.clip.index;
+    const virtual_index = self.virtualIndex(clip);
+    self.index = clip.orderd.items[virtual_index];
+    const frame_changed = self.previous_index != self.index;
 
-    self.constructUi(window, &self.ui);
-    self.interactUi(window, ui);
+    self.constructUi(window, &self.ui, clip);
+    self.interactUi(window, ui, clip);
 
     self.vertices.clearRetainingCapacity();
     make(self.ui.quads, &self.vertices);
@@ -110,8 +111,7 @@ pub fn update(self: *Editor, window: *Window) !Output {
     };
 }
 
-fn constructUi(self: *Editor, window: *Window, ui: *Ui) void {
-    const clip = &self.clip;
+fn constructUi(self: *Editor, window: *Window, ui: *Ui, clip: *const Clip) void {
     const window_ptr = window.pointer;
     const mouse_pos = window_ptr.movement.position;
     const region = &self.box_select.region;
@@ -189,7 +189,7 @@ fn constructUi(self: *Editor, window: *Window, ui: *Ui) void {
     }
 
     ui.add("timeline", .{ .size = .{
-        .percent = .{ .width = clip.playhead(), .height = 0 },
+        .percent = .{ .width = self.playhead(clip), .height = 0 },
     } });
     ui.add("timeline", .{
         .name = "playhead",
@@ -201,8 +201,7 @@ fn constructUi(self: *Editor, window: *Window, ui: *Ui) void {
     ui.end();
 }
 
-fn interactUi(self: *Editor, window: *Window, ui: *Ui) void {
-    const clip = &self.clip;
+fn interactUi(self: *Editor, window: *Window, ui: *Ui, clip: *const Clip) void {
     const pointer = window.pointer;
     const box_select = &self.box_select;
 
@@ -210,7 +209,7 @@ fn interactUi(self: *Editor, window: *Window, ui: *Ui) void {
         const tl = ui.rect("timeline");
         const info = clip.info;
         const new_playhead = std.math.clamp((ui.mouse_state.position.left - tl.left) / tl.width, 0, 1);
-        clip.counter = @as(usize, @intFromFloat(new_playhead * @as(f32, @floatFromInt(clip.orderd.items.len)))) * (info.fps_num / info.fps_den);
+        self.counter = @as(usize, @intFromFloat(new_playhead * @as(f32, @floatFromInt(clip.orderd.items.len)))) * (info.fps_num / info.fps_den);
     }
     const timeline_rect = ui.rect("timeline");
     const mouse_position = ui.mouse_state.position;
@@ -298,11 +297,11 @@ fn make(quads: std.ArrayList(Ui.Quad), vertices: *std.ArrayList(Renderer.UiVerte
     }
 }
 
-pub fn getFrameData(self: *Editor) TextureData {
-    self.clip.previous_index = self.clip.index;
+pub fn getFrameData(self: *Editor, clip: *const Clip) TextureData {
+    self.previous_index = self.index;
     return .{
-        .height = self.clip.info.height,
-        .width = self.clip.info.width,
-        .bytes = self.clip.frames.items[self.clip.index],
+        .height = clip.info.height,
+        .width = clip.info.width,
+        .bytes = clip.memory[self.index * clip.frameSize() ..][0..clip.frameSize()],
     };
 }

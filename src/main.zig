@@ -18,8 +18,23 @@ pub fn main(init: std.process.Init) !void {
     var hot: HotLib(System.Api) = try .init("system", gpa, init.io);
     defer hot.deinit(init.io);
 
+    var buf_cache: [std.fs.max_path_bytes]u8 = undefined;
+    const cache_path = if (init.environ_map.get("XDG_CACHE_HOME")) |xdg_cache|
+        try std.fmt.bufPrint(&buf_cache, "{s}/gifer", .{xdg_cache})
+    else if (init.environ_map.get("HOME")) |home|
+        try std.fmt.bufPrint(&buf_cache, "{s}/.cache/gifer", .{home})
+    else
+        return error.NoHome;
+    const cache_dir = try std.Io.Dir.cwd().createDirPathOpen(init.io, cache_path, .{});
+
     var system: System = undefined;
-    if (!hot.api.systemInit(&system, &gpa, &init.io, &window)) return error.SystemInit;
+    const desc: System.InitDescription = .{
+        .gpa = &gpa,
+        .io = &init.io,
+        .window = &window,
+        .cache_dir = &cache_dir,
+    };
+    if (!hot.api.systemInit(&system, &desc)) return error.SystemInit;
     defer hot.api.systemDeinit(&system);
 
     while (!window.should_close) {

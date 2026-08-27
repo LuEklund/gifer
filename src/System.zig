@@ -12,16 +12,23 @@ gpa: std.mem.Allocator,
 io: std.Io,
 renderer: Renderer,
 editor: Editor,
+clip: Clip,
+clip_file: std.Io.File,
+clip_map: std.Io.File.MemoryMap,
+cache_dir: std.Io.Dir,
 
-//TODO: ffmpeg package for zig, queues instead fo arrays? or indecies?
-
-fn init(self: *System, gpa: std.mem.Allocator, io: std.Io, window: *Window) !void {
+fn init(self: *System, desc: InitDescription) !void {
+    const gpa = desc.gpa.*;
+    const io = desc.io.*;
+    const window = desc.window;
     self.gpa = gpa;
     self.io = io;
+    self.cache_dir = desc.cache_dir.*;
     try self.renderer.init(gpa, io, window);
     try Editor.init(&self.editor, gpa, window);
 
-    var recording = Capture.startRecording(gpa, io, "/tmp/test.mp4") catch return;
+    const record_path = "/tmp/test.mp4";
+    var recording = Capture.startRecording(gpa, io, record_path) catch return;
     std.debug.print("recording... press enter to stop\n", .{});
     var buf: [8]u8 = undefined;
     _ = try std.Io.File.stdin().readStreaming(io, &.{&buf});
@@ -29,14 +36,18 @@ fn init(self: *System, gpa: std.mem.Allocator, io: std.Io, window: *Window) !voi
     const path = try recording.stop(io);
     std.debug.print("saved: {s}\n", .{path});
 
-    self.editor.clip = try load(gpa, io, "/tmp/test.mp4");
-
-    // std.debug.print("{} frames, {}x{}\n", .{ self.clip.frames.items.len, self.clip.info.width, self.clip.info.height });
-    self.editor.display_handle = try self.renderer.uploadTexture(null, self.editor.getFrameData());
+    const loaded = try load(gpa, io, self.cache_dir, record_path);
+    self.clip = loaded.clip;
+    self.clip_file = loaded.file;
+    self.clip_map = loaded.map;
+    self.editor.display_handle = try self.renderer.uploadTexture(null, self.editor.getFrameData(&self.clip));
 }
 
 fn deinit(self: *System) void {
     self.editor.deinit(self.gpa);
+    self.clip.orderd.deinit(self.gpa);
+    self.clip_map.destroy(self.io);
+    self.clip_file.close(self.io);
     self.renderer.deinit();
 }
 
@@ -44,10 +55,9 @@ fn update(self: *System, window: *Window) !void {
     try self.renderer.updateShaders(self.io);
     try self.renderer.begin(window.size, .{ .clear_color = .{ 0.0, 0.0, 0.0, 1.0 } });
 
-    const output = try self.editor.update(window);
-    // std.log.debug("{d} : {d}", .{ virtual_index, self.clip.orderd.items.len });
+    const output = try self.editor.update(window, &self.clip);
     if (output.frame_changed) {
-        self.editor.display_handle = try self.renderer.uploadTexture(self.editor.display_handle, self.editor.getFrameData());
+        self.editor.display_handle = try self.renderer.uploadTexture(self.editor.display_handle, self.editor.getFrameData(&self.clip));
     }
 
     try self.renderer.draw(.{
@@ -59,50 +69,49 @@ fn update(self: *System, window: *Window) !void {
     });
     try self.renderer.submit();
 
-    if (output.request_export) try exportClip(self.io, self.editor.clip);
+    if (output.request_export) try exportClip(self.io, &self.clip);
 }
 
-pub fn load(gpa: std.mem.Allocator, io: std.Io, path: []const u8) !Clip {
-    const info = try probe(gpa, io, path);
+pub const Loaded = struct { clip: Clip, file: std.Io.File, map: std.Io.File.MemoryMap };
+pub fn load(gpa: std.mem.Allocator, io: std.Io, cache_dir: std.Io.Dir, src_path: []const u8) !Loaded {
+    const info = try probe(gpa, io, src_path);
+
+    const file = try cache_dir.createFile(io, "clip.raw", .{ .read = true, .truncate = true });
+    cache_dir.deleteFile(io, "clip.raw") catch {};
 
     var child = try std.process.spawn(io, .{
         .argv = &.{
             "ffmpeg",   "-v",       "error",
-            "-i",       path,       "-f",
+            "-i",       src_path,   "-f",
             "rawvideo", "-pix_fmt", "rgba",
             "pipe:1",
         },
-        .stdout = .pipe,
+        .stdout = .{ .file = file },
     });
 
-    const frame_len = info.width * info.height * 4;
-    var read_buf: [64 * 1024]u8 = undefined;
-    var reader = child.stdout.?.reader(io, &read_buf);
-
-    var frames: std.ArrayList([]u8) = .empty;
-    while (true) {
-        const frame = try gpa.alloc(u8, frame_len);
-        const n = try reader.interface.readSliceShort(frame);
-        if (n == frame_len) {
-            try frames.append(gpa, frame);
-            continue;
-        }
-        gpa.free(frame);
-        if (n != 0) return error.TruncatedStream;
-        break;
-    }
     _ = try child.wait(io);
+    const frame_len: usize = info.width * info.height * 4;
+    const total = try file.length(io);
+    if (total % frame_len != 0) return error.TruncatedStream;
+    const count: usize = @intCast(total / frame_len);
 
-    var ordered: std.ArrayList(u32) = try .initCapacity(gpa, frames.items.len);
-    for (0..ordered.capacity) |i| ordered.appendAssumeCapacity(@intCast(i));
+    const map = try file.createMemoryMap(io, .{
+        .len = @intCast(total),
+        .protection = .{ .read = true, .write = false },
+        .populate = false,
+    });
+
+    var ordered: std.ArrayList(u32) = try .initCapacity(gpa, count);
+    for (0..count) |i| ordered.appendAssumeCapacity(@intCast(i));
 
     return .{
-        .info = info,
-        .frames = frames,
-        .index = 0,
-        .previous_index = 0,
-        .counter = 0,
-        .orderd = ordered,
+        .clip = .{
+            .info = info,
+            .memory = map.memory,
+            .orderd = ordered,
+        },
+        .file = file,
+        .map = map,
     };
 }
 
@@ -126,7 +135,7 @@ fn probe(gpa: std.mem.Allocator, io: std.Io, path: []const u8) !Info {
     };
 }
 
-fn exportClip(io: std.Io, clip: Clip) !void {
+fn exportClip(io: std.Io, clip: *const Clip) !void {
     std.log.debug("export START", .{});
     var size_buf: [256]u8 = undefined;
     const size = try std.fmt.bufPrint(&size_buf, "{d}x{d}", .{ clip.info.width, clip.info.height });
@@ -144,8 +153,9 @@ fn exportClip(io: std.Io, clip: Clip) !void {
     });
     var buf: [2048]u8 = undefined;
     var writer = child.stdin.?.writer(io, &buf);
+    const frame_size = clip.frameSize();
     for (clip.orderd.items) |frame_index| {
-        try writer.interface.writeAll(clip.frames.items[frame_index]);
+        try writer.interface.writeAll(clip.memory[frame_index * frame_size ..][0..frame_size]);
     }
     try writer.flush();
     child.stdin.?.close(io);
@@ -155,8 +165,15 @@ fn exportClip(io: std.Io, clip: Clip) !void {
 }
 
 //Hot reload stuff
+pub const InitDescription = struct {
+    gpa: *const std.mem.Allocator,
+    io: *const std.Io,
+    window: *Window,
+    cache_dir: *const std.Io.Dir,
+};
+
 pub const Api = struct {
-    systemInit: *const fn (*System, *const std.mem.Allocator, *const std.Io, *Window) callconv(.c) bool,
+    systemInit: *const fn (*System, *const InitDescription) callconv(.c) bool,
     systemUpdate: *const fn (*System, *Window) callconv(.c) void,
     systemDeinit: *const fn (*System) callconv(.c) void,
 };
@@ -166,9 +183,9 @@ comptime {
 }
 
 pub const ffi = struct {
-    pub export fn systemInit(system: *System, gpa: *const std.mem.Allocator, io: *const std.Io, window: *Window) bool {
+    pub export fn systemInit(system: *System, desc: *const InitDescription) bool {
         std.log.info("system init", .{});
-        system.init(gpa.*, io.*, window) catch |err| {
+        system.init(desc.*) catch |err| {
             logError("init", err, @errorReturnTrace());
             return false;
         };

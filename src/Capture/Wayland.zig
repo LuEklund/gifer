@@ -14,11 +14,10 @@ pub const Recording = struct {
 
 pub fn startRecording(gpa: std.mem.Allocator, io: std.Io, path: []const u8) !Recording {
     const geometry = try selectRegion(gpa, io);
-    // becomes private, returns the raw line
     defer gpa.free(geometry);
 
     const child = try std.process.spawn(io, .{
-        .argv = &.{ "wf-recorder", "-g", std.mem.trim(u8, geometry, "\n"), "-f", path },
+        .argv = &.{ "wf-recorder", "-g", std.mem.trim(u8, geometry, "\n"), "-y", "-f", path },
     });
     return .{ .child = child, .path = path };
 }

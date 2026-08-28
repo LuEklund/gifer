@@ -6,12 +6,16 @@ const Renderer = @import("Renderer.zig");
 const Ui = @import("Ui.zig");
 const TextureData = Renderer.TextureData;
 
+pub const frame_quad_budget = 20;
+
 gpa: std.mem.Allocator,
 ui: Ui,
 vertices: std.ArrayList(Renderer.UiVertex) = .empty,
 playing: bool = false,
 display_index: usize = 0,
 previous_index: usize = std.math.maxInt(usize),
+thumbnail_indices: [Editor.frame_quad_budget]usize = @splat(std.math.maxInt(usize)),
+thumbnail_count: usize = 0,
 counter: usize = 0,
 box_select: SelectBox,
 
@@ -76,13 +80,24 @@ pub fn deinit(self: *Editor, gpa: std.mem.Allocator) void {
     self.ui.deinit(gpa);
 }
 
+pub const Input = struct {
+    clip: *Clip,
+    display: Renderer.TextureHandle,
+    thumbnails: []?Renderer.TextureHandle,
+};
 pub const Output = struct {
+    request_thumbnail_indecis: [Editor.frame_quad_budget]usize,
     ui_vertices: []const Renderer.UiVertex,
     display_index: usize = 0,
     frame_changed: bool = false,
     request_export: bool = false,
 };
-pub fn update(self: *Editor, window: *Window, clip: *Clip, display: Renderer.TextureHandle) !Output {
+pub fn update(
+    self: *Editor,
+    window: *Window,
+    input: Input,
+) !Output {
+    const clip = input.clip;
     const ui = &self.ui;
     if (self.playing) {
         // std.log.debug("play", .{});
@@ -100,7 +115,7 @@ pub fn update(self: *Editor, window: *Window, clip: *Clip, display: Renderer.Tex
         self.previous_index = self.display_index;
     }
 
-    self.constructUi(window, &self.ui, clip, playhead_frac, display);
+    self.constructUi(window, &self.ui, clip, playhead_frac, input);
     self.interactUi(window, ui, clip);
 
     self.vertices.clearRetainingCapacity();
@@ -123,6 +138,7 @@ pub fn update(self: *Editor, window: *Window, clip: *Clip, display: Renderer.Tex
         clip.orderd = new_orderd;
     }
     return .{
+        .request_thumbnail_indecis = self.thumbnail_indices,
         .ui_vertices = self.vertices.items,
         .display_index = self.display_index,
         .frame_changed = frame_changed,
@@ -130,7 +146,7 @@ pub fn update(self: *Editor, window: *Window, clip: *Clip, display: Renderer.Tex
     };
 }
 
-fn constructUi(self: *Editor, window: *Window, ui: *Ui, clip: *const Clip, playhead_frac: f32, display: Renderer.TextureHandle) void {
+fn constructUi(self: *Editor, window: *Window, ui: *Ui, clip: *const Clip, playhead_frac: f32, input: Input) void {
     const window_ptr = window.pointer;
     const mouse_pos = window_ptr.movement.position;
     // const region = &self.box_select.region;
@@ -158,7 +174,7 @@ fn constructUi(self: *Editor, window: *Window, ui: *Ui, clip: *const Clip, playh
     ui.add("display", .{
         .size = .{ .percent = .{ .width = 1, .height = 0.5 } },
         .color = .new(1, 1, 1, 1),
-        .texture = @intFromEnum(display),
+        .texture = @intFromEnum(input.display),
     });
 
     const timeline_h: f32 = 0.15;
@@ -189,18 +205,20 @@ fn constructUi(self: *Editor, window: *Window, ui: *Ui, clip: *const Clip, playh
         .floating = true,
     });
 
-    const quad_budget = 20;
     const len = clip.orderd.items.len;
-    const frames_per_quad = @max(1, std.math.divCeil(usize, len, quad_budget) catch unreachable);
-    const quad_count = std.math.divCeil(usize, len, frames_per_quad) catch unreachable;
-    const slice_width = 1 / @as(f32, @floatFromInt(quad_count));
+    const frames_per_quad = @max(1, std.math.divCeil(usize, len, frame_quad_budget) catch unreachable);
+    self.thumbnail_count = std.math.divCeil(usize, len, frames_per_quad) catch unreachable;
+    const slice_width = 1 / @as(f32, @floatFromInt(self.thumbnail_count));
     const selected = self.box_select.frames;
-    for (0..quad_count) |i| {
-        const first_frame = i * frames_per_quad;
-        const is_selected = first_frame >= selected.first and first_frame < selected.first + selected.count;
+    for (0..self.thumbnail_count) |i| {
+        const texture: Renderer.TextureHandle = if (i < input.thumbnails.len) input.thumbnails[i] orelse .blank else .blank;
+        const first_frame_index = i * frames_per_quad;
+        self.thumbnail_indices[i] = clip.orderd.items[first_frame_index];
+        const is_selected = first_frame_index >= selected.first and first_frame_index < selected.first + selected.count;
         ui.add("display_frames", .{
             .size = .{ .percent = .{ .height = 1, .width = slice_width } },
-            .color = if (is_selected) .new(0, 0, 1, 0.5) else .new(1, 0.5, 0.5, 0.5),
+            .texture = @intFromEnum(texture),
+            .color = if (is_selected) .new(0.1, 0.5, 0.5, 0.5) else .new(1, 1, 1, 1),
         });
     }
     // if (self.box_select.state == .selecting) {

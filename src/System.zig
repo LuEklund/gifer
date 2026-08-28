@@ -18,6 +18,8 @@ clip_map: std.Io.File.MemoryMap,
 decode: std.process.Child,
 frames_decoded: usize,
 display: ?Renderer.TextureHandle,
+thumbnails: [Editor.frame_quad_budget]?Renderer.TextureHandle,
+thumbnail_indecis: [Editor.frame_quad_budget]usize,
 cache_dir: std.Io.Dir,
 
 fn init(self: *System, desc: InitDescription) !void {
@@ -64,6 +66,8 @@ fn init(self: *System, desc: InitDescription) !void {
         .frames_decoded = 0,
         .display = null,
         .cache_dir = cache_dir,
+        .thumbnails = @splat(null),
+        .thumbnail_indecis = @splat(std.math.maxInt(usize)),
     };
     try self.renderer.init(gpa, io, window);
     try self.editor.init(gpa, window);
@@ -86,9 +90,21 @@ fn update(self: *System, window: *Window) !void {
     try self.renderer.updateShaders(self.io);
     try self.renderer.begin(window.size, .{ .clear_color = .{ 0.0, 0.0, 0.0, 1.0 } });
 
-    const output = try self.editor.update(window, &self.clip, self.display orelse .blank);
+    const output = try self.editor.update(
+        window,
+        .{
+            .clip = &self.clip,
+            .display = self.display orelse .blank,
+            .thumbnails = &self.thumbnails,
+        },
+    );
     if (output.frame_changed) {
         self.display = try self.renderer.uploadTexture(self.display, self.clip.frameData(output.display_index));
+    }
+    for (output.request_thumbnail_indecis, 0..) |requested, i| {
+        if (self.thumbnail_indecis[i] == requested) continue;
+        self.thumbnails[i] = try self.renderer.uploadTexture(self.thumbnails[i], self.clip.frameData(requested));
+        self.thumbnail_indecis[i] = requested;
     }
 
     try self.renderer.draw(.{
@@ -101,6 +117,7 @@ fn update(self: *System, window: *Window) !void {
     try self.renderer.submit();
 
     if (output.request_export) try exportClip(self.io, &self.clip);
+    // window.should_close = true;
 }
 
 fn startDecode(io: std.Io, file: std.Io.File, src_path: []const u8) !std.process.Child {

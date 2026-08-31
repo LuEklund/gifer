@@ -12,9 +12,9 @@ gpa: std.mem.Allocator,
 ui: Ui,
 vertices: std.ArrayList(Renderer.UiVertex) = .empty,
 playing: bool = false,
-display_index: usize = 0,
-previous_index: usize = std.math.maxInt(usize),
-thumbnail_indices: [Editor.frame_quad_budget]usize = @splat(std.math.maxInt(usize)),
+display_index: Clip.FrameId = .invalid,
+previous_index: Clip.FrameId = .invalid,
+thumbnail_indices: [Editor.frame_quad_budget]Clip.FrameId = @splat(.invalid),
 thumbnail_count: usize = 0,
 counter: usize = 0,
 box_select: SelectBox,
@@ -38,7 +38,9 @@ pub const SelectBox = struct {
 pub const Clip = struct {
     info: Info,
     memory: []u8,
-    orderd: std.ArrayList(u32),
+    orderd: std.ArrayList(FrameId),
+
+    pub const FrameId = enum(u32) { invalid = std.math.maxInt(u32), _ };
 
     pub const Info = struct {
         width: u32,
@@ -52,11 +54,11 @@ pub const Clip = struct {
         return clip.info.width * clip.info.height * 4;
     }
 
-    pub fn frameData(clip: *const Clip, frame: usize) TextureData {
+    pub fn frameData(clip: *const Clip, frame: FrameId) TextureData {
         return .{
             .height = clip.info.height,
             .width = clip.info.width,
-            .bytes = clip.memory[frame * clip.frameSize() ..][0..clip.frameSize()],
+            .bytes = clip.memory[@intFromEnum(frame) * clip.frameSize() ..][0..clip.frameSize()],
         };
     }
 };
@@ -86,9 +88,9 @@ pub const Input = struct {
     thumbnails: []?Renderer.TextureHandle,
 };
 pub const Output = struct {
-    request_thumbnail_indecis: [Editor.frame_quad_budget]usize,
+    request_thumbnail_indecis: [Editor.frame_quad_budget]Clip.FrameId,
     ui_vertices: []const Renderer.UiVertex,
-    display_index: usize = 0,
+    display_index: Clip.FrameId = .invalid,
     frame_changed: bool = false,
     request_export: bool = false,
 };
@@ -129,7 +131,7 @@ pub fn update(
         self.box_select.frames = .{};
     }
     if (window.keyboard.get(.i) == .press) {
-        var new_orderd: std.ArrayList(u32) = try .initCapacity(self.gpa, clip.orderd.items.len / 2);
+        var new_orderd: std.ArrayList(Clip.FrameId) = try .initCapacity(self.gpa, clip.orderd.items.len / 2);
         for (0..clip.orderd.items.len) |i| {
             if (i % 2 == 0) continue;
             new_orderd.appendAssumeCapacity(clip.orderd.items[i]);

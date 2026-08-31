@@ -19,7 +19,7 @@ decode: std.process.Child,
 frames_decoded: usize,
 display: ?Renderer.TextureHandle,
 thumbnails: [Editor.frame_quad_budget]?Renderer.TextureHandle,
-thumbnail_indecis: [Editor.frame_quad_budget]usize,
+thumbnail_indecis: [Editor.frame_quad_budget]Editor.Clip.FrameId,
 cache_dir: std.Io.Dir,
 
 fn init(self: *System, desc: InitDescription) !void {
@@ -67,7 +67,7 @@ fn init(self: *System, desc: InitDescription) !void {
         .display = null,
         .cache_dir = cache_dir,
         .thumbnails = @splat(null),
-        .thumbnail_indecis = @splat(std.math.maxInt(usize)),
+        .thumbnail_indecis = @splat(.invalid),
     };
     try self.renderer.init(gpa, io, window);
     try self.editor.init(gpa, window);
@@ -85,7 +85,7 @@ fn update(self: *System, window: *Window) !void {
     const ready: usize = @intCast(try self.clip_file.length(self.io) / self.clip.frameSize());
     const capped = @min(ready, self.clip.info.frame_count);
     while (self.frames_decoded < capped) : (self.frames_decoded += 1)
-        self.clip.orderd.appendAssumeCapacity(@intCast(self.frames_decoded));
+        self.clip.orderd.appendAssumeCapacity(@enumFromInt(self.frames_decoded));
 
     try self.renderer.updateShaders(self.io);
     try self.renderer.begin(window.size, .{ .clear_color = .{ 0.0, 0.0, 0.0, 1.0 } });
@@ -171,9 +171,8 @@ fn exportClip(io: std.Io, clip: *const Clip) !void {
     });
     var buf: [2048]u8 = undefined;
     var writer = child.stdin.?.writer(io, &buf);
-    const frame_size = clip.frameSize();
-    for (clip.orderd.items) |frame_index| {
-        try writer.interface.writeAll(clip.memory[frame_index * frame_size ..][0..frame_size]);
+    for (clip.orderd.items) |frame_id| {
+        try writer.interface.writeAll(clip.frameData(frame_id).bytes);
     }
     try writer.flush();
     child.stdin.?.close(io);
